@@ -7,10 +7,11 @@
 constexpr uint32_t LOCKED_READING_START_MASK = 0x80000001;
 constexpr uint32_t LAST_BIT_MASK = 1 << 31; 
 
-struct alignas(64) mrw_qnode
+struct mrw_qnode
 {
     // cap of 2^31, bit 31 is for locked
-    std::atomic<uint32_t> count;
+    alignas(64) std::atomic<uint32_t> count;
+    alignas(64) bool locked;
     std::atomic<mrw_qnode*> next;
 };
 
@@ -36,6 +37,12 @@ public:
     bool isLocked(uint32_t counter);
     void setLocked(mrw_qnode* node, bool set);
     void resetNode(mrw_qnode* node);
+
+    inline bool spin(mrw_qnode* node)
+    {
+        return node->locked;
+        //return isLocked(node->count.load());
+    }
 
     void print();
 

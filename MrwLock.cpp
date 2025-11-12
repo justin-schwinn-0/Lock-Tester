@@ -51,7 +51,7 @@ void MrwLock::readLock()
                 if(myTarget->count.compare_exchange_strong(unmaskedCount,newCount))
                 {
                     // cas successful, spin on target
-                    while(isLocked(myTarget->count.load()))
+                    while(spin(myTarget))
                     {
                         std::this_thread::yield();
                     }
@@ -61,9 +61,9 @@ void MrwLock::readLock()
                 {
                     // cas failed
                     // count inc or is no longer locked
-                    if(isLocked(curCount))
+                    if(isLocked(unmaskedCount))
                     {
-                        newCount = curCount+1;
+                        newCount = unmaskedCount + 1;
                     }
                     else
                     {
@@ -110,7 +110,7 @@ void MrwLock::performAquire(mrw_qnode* node)
         pred->next.store(node);
 
         // while locked==true
-        while(isLocked(node->count.load()))
+        while(spin(node))
         {
             std::this_thread::yield();
         }
@@ -160,6 +160,8 @@ void MrwLock::setLocked(mrw_qnode* node, bool set)
     {
         node->count.fetch_and(~LAST_BIT_MASK);
     }
+
+    node->locked = set;
 }
 
 void MrwLock::resetNode(mrw_qnode* node)
