@@ -24,6 +24,7 @@ set(Sources
     CnaLock.cpp
     CrmrRwLock.cpp
     MrwLock.cpp
+    MrwLockOpt.cpp
 )
 
 set(Headers
@@ -43,6 +44,7 @@ set(Headers
     BaseRwLock.h
     CrmrRwLock.h
     MrwLock.h
+    MrwLockOpt.h
 )
 
 add_executable(${PROJECT_NAME} ${Sources} ${Headers})

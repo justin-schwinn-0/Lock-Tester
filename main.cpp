@@ -4,6 +4,8 @@
 #include <iomanip>
 #include <sstream>
 #include <numeric>
+#include <functional>
+#include <unistd.h>
 
 #include "Utils.h"
 #include "PetersonLock.h"
@@ -19,6 +21,10 @@
 #include "BaseRwLock.h"
 #include "CrmrRwLock.h"
 #include "MrwLock.h"
+#include "MrwLockOpt.h"
+
+template<typename Lock>
+using ThreadFn = void(*)(Lock&,bool&,bool&,uint64_t&);
 
 // our critial section
 template<class T>
@@ -122,6 +128,67 @@ void RwThread
                 readFails++;
             }
             */
+            lock.readUnlock();
+        }
+    }
+}
+
+template<class RwLockType>
+void rwEmptyThread
+(
+    RwLockType& lock,
+    bool& startBarrier,
+    bool& continueFlag,
+    uint64_t& iterations
+)
+{
+    while(!startBarrier);
+
+    while(continueFlag)
+    {
+        int rem = iterations % 10;
+        iterations++;
+        if(rem == 0)
+        {
+            lock.writeLock();
+            lock.writeUnlock();
+        }
+        else
+        {
+            lock.readLock();
+            lock.readUnlock();
+        }
+    }
+}
+
+std::vector<uint64_t> smallWorkVec = std::vector<uint64_t>(16,16);
+
+template<class RwLockType>
+void rwSmallWork 
+(
+    RwLockType& lock,
+    bool& startBarrier,
+    bool& continueFlag,
+    uint64_t& iterations
+)
+{
+    pid_t pid = getpid();
+    while(!startBarrier);
+
+    while(continueFlag)
+    {
+        int rem = iterations % 10;
+        iterations++;
+        if(rem == 0)
+        {
+            lock.writeLock();
+            writeTest(smallWorkVec,pid);
+            lock.writeUnlock();
+        }
+        else
+        {
+            lock.readLock();
+            readTest(smallWorkVec);
             lock.readUnlock();
         }
     }
@@ -240,13 +307,59 @@ std::tuple<uint64_t,uint64_t,uint64_t> runRwTest
     return tup;
 }
 
-template<typename rwlock>
-
-void rwTestEmpty
+template<typename RwLockType>
+uint64_t dynamicLockTest 
 (
+    const uint64_t numThreads,
+    int seconds,
+    const ThreadFn<RwLockType> fn
 )
 {
+    using namespace std::chrono_literals;
+    std::vector<std::thread> threads;
 
+    std::vector<uint64_t> iterations = std::vector<uint64_t>(16,0);
+
+    bool start = false;
+    bool continueFlag = true;
+
+    RwLockType lock;
+
+    for(int i = 0; i < numThreads; i++)
+    {
+        threads.push_back(std::thread(
+                            fn,
+                            std::ref(lock),
+                            std::ref(start),
+                            std::ref(continueFlag),
+                            std::ref(iterations[i])));
+    }
+
+    std::this_thread::sleep_for(50ms);
+    auto startTime = std::chrono::high_resolution_clock::now();
+
+    start = true;
+
+    while(continueFlag)
+    {
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        auto dur = std::chrono::duration_cast<std::chrono::seconds>(currentTime - startTime).count();
+
+        if(dur >= seconds)
+        {
+           continueFlag = false; 
+        }
+
+    }
+
+    for(int i = 0; i < numThreads; i++)
+    {
+        threads[i].join();
+    }
+
+    uint64_t totalIterations = std::accumulate(iterations.begin(), iterations.end(),0);
+
+    return totalIterations;
 }
 
 std::string strSpace(int num)
@@ -261,25 +374,24 @@ std::string strSpace(int num)
 }
 
 
-template<typename rwlock>
+template<typename RwLockType>
 void rwThrptTests
 (
     const int seconds,
     const std::vector<int> threadCounts,
     const int trials,
-    const std::string& name
+    const std::string& name,
+    const ThreadFn<RwLockType> fn
 )
 {
-    printf("Running Tests for %s\n",name.c_str());
     for(int tcount : threadCounts)
     {
-        printf("T:%d",tcount);
+        printf("%s,%d,",name.c_str(),tcount);
         for(int i = 0 ; i < trials; i++)
         {
-            auto [wFails,rFails,itrs] = runRwTest<rwlock>(tcount,seconds); 
+            uint64_t itrs = dynamicLockTest<RwLockType>(tcount,seconds,fn); 
             double itrRate = itrs / static_cast<double>(seconds);
-            printf("\t%.2e",itrRate);
-            fflush(stdout);
+            printf("%.2e",itrRate);
         }
         printf("\n");
     }
@@ -412,20 +524,46 @@ std::vector<int> getCompConfig(int maxT)
     return vec;
 }
 
-int main()
-{   
+template<typename lock>
+void runTestSuit(const std::string& name)
+{
+    const int time = 1;
+    const int testIterations = 1;
     const int numThreads = std::thread::hardware_concurrency();
+
+    rwThrptTests<lock>(
+            time,
+            getCompConfig(numThreads),
+            testIterations, 
+            name + ",empty_cs",
+            &rwEmptyThread<lock>);
+
+    rwThrptTests<lock>(
+            time,
+            getCompConfig(numThreads),
+            testIterations, 
+            name + ",small_cs",
+            &rwSmallWork<lock>);
+}
+
+int main(int argc, char** argv)
+{   
+    if(argc != 2)
+    {
+        printf("Needs name argument!\n");
+        return 1;
+    }
+    std::string hardwareName = argv[1];
 
     const uint64_t bigGoalNum = 1e7;
     const uint64_t littleGoalNum = 2e3;
     const uint64_t threadCount = 8;
 
-    const int testIterations = 3;
+    const int numThreads = std::thread::hardware_concurrency();
 
     std::vector<int> threadsSmall = {2};
     std::vector<int> threadMid = {2,4,8};
     std::vector<int> threadLarge = {16,16,16,16,16};
-    printf("Running tests on %d threads\n",numThreads);
 
 /*
     runTestsForLock<PetersonLock>(bigGoalNum,threadsSmall,"Peterson Lock");
@@ -455,6 +593,8 @@ int main()
 
     //runRwCorrectnessTestsForLock<MrwLock>(10,getTConfig(1,8),"MRW Lock");
     
-    rwThrptTests<CrmrRwLock>(1,getCompConfig(numThreads),testIterations,"CRMR RW Lock");
-    rwThrptTests<MrwLock>(1,getCompConfig(numThreads),testIterations, "MRW Lock");
+    runTestSuit<BaseRwLock>(hardwareName+",Cpp_Shared_Mutex");
+    runTestSuit<CrmrRwLock>(hardwareName+",C-RMR-RW-Lock");
+    runTestSuit<MrwLock>(hardwareName+",Mrw-Lock");
+    runTestSuit<MrwLockOpt>(hardwareName+",Mrw-Lock-Opt");
 }

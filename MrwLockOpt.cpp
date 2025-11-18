@@ -1,21 +1,21 @@
-#include "MrwLock.h"
+#include "MrwLockOpt.h"
 
 #include <thread>
 #include <cstdio>
 
-static thread_local mrw_qnode mine[2];
-static thread_local mrw_qnode* myTarget;
+static thread_local mrwo_qnode mine[2];
+static thread_local mrwo_qnode* myTarget;
 static thread_local int cur = 0;
 
-MrwLock::MrwLock():
+MrwLockOpt::MrwLockOpt():
     mTail(nullptr)
 {
 }
-MrwLock::~MrwLock()
+MrwLockOpt::~MrwLockOpt()
 {
 }
 
-void MrwLock::writeLock()
+void MrwLockOpt::writeLock()
 {
     myTarget = nullptr;
     cur = 1 - cur;
@@ -23,12 +23,12 @@ void MrwLock::writeLock()
     performAquire(&mine[cur]);
 }
 
-void MrwLock::writeUnlock()
+void MrwLockOpt::writeUnlock()
 {
     performRelease(&mine[cur]);
 }
 
-void MrwLock::readLock()
+void MrwLockOpt::readLock()
 {
     bool makeOwnNode = false;
     do
@@ -91,7 +91,7 @@ void MrwLock::readLock()
 
 }
 
-void MrwLock::readUnlock()
+void MrwLockOpt::readUnlock()
 {
     uint32_t curCount = myTarget->count.fetch_sub(1);
     if(curCount == 1)
@@ -100,9 +100,9 @@ void MrwLock::readUnlock()
     }
 }
 
-void MrwLock::performAquire(mrw_qnode* node)
+void MrwLockOpt::performAquire(mrwo_qnode* node)
 {
-    mrw_qnode* pred = mTail.exchange(node);
+    mrwo_qnode* pred = mTail.exchange(node);
 
     if(pred)
     {
@@ -121,13 +121,13 @@ void MrwLock::performAquire(mrw_qnode* node)
     }
 }
 
-void MrwLock::performRelease(mrw_qnode* node)
+void MrwLockOpt::performRelease(mrwo_qnode* node)
 {
-    mrw_qnode* next = node->next.load();
+    mrwo_qnode* next = node->next.load();
     if(next == nullptr)
     {
-        mrw_qnode* tmp = node;
-        if(mTail.compare_exchange_strong(tmp,static_cast<mrw_qnode*>(nullptr)))
+        mrwo_qnode* tmp = node;
+        if(mTail.compare_exchange_strong(tmp,static_cast<mrwo_qnode*>(nullptr)))
         {
             return;
         }
@@ -145,12 +145,12 @@ void MrwLock::performRelease(mrw_qnode* node)
     }
 }
 
-bool MrwLock::isLocked(uint32_t counter)
+bool MrwLockOpt::isLocked(uint32_t counter)
 {
     return (counter & 0x80000000) > 0; 
 }
 
-void MrwLock::setLocked(mrw_qnode* node, bool set)
+void MrwLockOpt::setLocked(mrwo_qnode* node, bool set)
 {
     if(set)
     {
@@ -160,18 +160,20 @@ void MrwLock::setLocked(mrw_qnode* node, bool set)
     {
         node->count.fetch_and(~LAST_BIT_MASK);
     }
+
+    node->locked = set;
 }
 
-void MrwLock::resetNode(mrw_qnode* node)
+void MrwLockOpt::resetNode(mrwo_qnode* node)
 {
     node->count.store(0);
     node->next.store(nullptr);
     setLocked(node,true);
 }
 
-void MrwLock::print()
+void MrwLockOpt::print()
 {
-    mrw_qnode* node = &mine[cur];
+    mrwo_qnode* node = &mine[cur];
     while(node)
     {
         printf("{%x}->",node->count.load());

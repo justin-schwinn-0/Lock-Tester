@@ -4,14 +4,10 @@
 #include <cstdint>
 #include <atomic>
 
-constexpr uint32_t LOCKED_READING_START_MASK = 0x80000001;
-constexpr uint32_t LAST_BIT_MASK = 1 << 31; 
-
 struct mrw_qnode
 {
     // cap of 2^31, bit 31 is for locked
-    alignas(64) std::atomic<uint32_t> count;
-    alignas(64) bool locked;
+    std::atomic<uint32_t> count;
     std::atomic<mrw_qnode*> next;
 };
 
@@ -40,7 +36,7 @@ public:
 
     inline bool spin(mrw_qnode* node)
     {
-        return node->locked;
+        return isLocked(node->count.load());
         //return isLocked(node->count.load());
     }
 
@@ -48,4 +44,7 @@ public:
 
 private:
     std::atomic<mrw_qnode*> mTail;
+
+    static constexpr uint32_t LOCKED_READING_START_MASK = 0x80000001;
+    static constexpr uint32_t LAST_BIT_MASK = 1 << 31; 
 };
