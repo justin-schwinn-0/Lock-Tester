@@ -8,6 +8,7 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread -g -O1")
 
 find_package(Threads REQUIRED)
+find_library(NUMA_LIB numa)
 
 set(Sources
     main.cpp
@@ -49,3 +50,4 @@ set(Headers
 
 add_executable(${PROJECT_NAME} ${Sources} ${Headers})
 target_link_libraries(${PROJECT_NAME} PRIVATE Threads::Threads)
+target_link_libraries(${PROJECT_NAME} PRIVATE numa)

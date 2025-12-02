@@ -1,5 +1,10 @@
 #include "CnaLock.h"
 
+#include <sched.h>
+#include <numa.h>
+#include <numaif.h>
+
+#include <cstdlib>
 #include <thread>
 
 static thread_local cna_qnode mine; 
@@ -88,14 +93,16 @@ void CnaLock::release(uint32_t me)
 
 int CnaLock::currentNumaNode()
 {
-    //TODO
-    return 1;
+    if(numa_available() < 0)
+        return 0;
+
+    int node = numa_node_of_cpu(sched_getcpu());
+    return node;
 }
 
 int CnaLock::keepLocal()
 {
-    // TODO
-    return 1;
+    return static_cast<uint16_t>(rand() & 0xffff);
 }
 
 cna_qnode* CnaLock::findSuccessor()
