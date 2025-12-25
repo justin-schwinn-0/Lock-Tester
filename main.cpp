@@ -6,6 +6,8 @@
 #include <numeric>
 #include <functional>
 #include <unistd.h>
+#include <ctime>
+#include <random>
 
 //mutex locks
 #include "Utils.h"
@@ -105,20 +107,80 @@ void RwThreadCorrectness
         }
     }
 }
-
 template<class rwlock>
-void rwCsThread
+void rwThread
 (
     rwlock& lock,
     bool& startBarrier,
     bool& continueFlag,
+    uint64_t& w_iterations,
+    uint64_t& r_iterations,
     std::function<void()> writeSection,
     std::function<void()> readSection,
-    uint64_t& w_iterations,
-    uint64_t& r_iterations
+    float writeRatio
 )
 {
+    while(!startBarrier);
 
+    while(continueFlag)
+    {
+        int rem = (w_iterations + r_iterations) % 10;
+        if(rem == 0)
+        {
+            //write
+            lock.writeLock();
+            writeSection();
+            lock.writeUnlock();
+            w_iterations++;
+        }
+        else
+        {
+            //read
+            lock.readLock();
+            readSection();
+            lock.readUnlock();
+            r_iterations++;
+        }
+    }
+}
+
+template<class rwlock>
+void rwRandThread
+(
+    rwlock& lock,
+    bool& startBarrier,
+    bool& continueFlag,
+    uint64_t& w_iterations,
+    uint64_t& r_iterations,
+    std::function<void()> writeSection,
+    std::function<void()> readSection,
+    float writeRatio
+)
+{
+    std::default_random_engine engine(static_cast<unsigned int>(std::time(nullptr)));
+    std::uniform_real_distribution<float> dist(0.0f,100.0f);
+    while(!startBarrier);
+
+    while(continueFlag)
+    {
+        float pick = dist(engine);
+        if(pick < writeRatio)
+        {
+            //write
+            lock.writeLock();
+            writeSection();
+            lock.writeUnlock();
+            w_iterations++;
+        }
+        else
+        {
+            //read
+            lock.readLock();
+            readSection();
+            lock.readUnlock();
+            r_iterations++;
+        }
+    }
 }
 
 template<class RwLockType>
@@ -249,6 +311,69 @@ std::tuple<uint64_t,uint64_t,uint64_t> runRwTest
 }
 
 template<typename RwLockType>
+std::pair<uint64_t, uint64_t> dynamicLockTest2 
+(
+    const uint64_t numThreads,
+    const int seconds,
+    std::function<void()> w_section,
+    std::function<void()> r_section,
+    float ratio
+)
+{
+    using namespace std::chrono_literals;
+    std::vector<std::thread> threads;
+
+    std::vector<uint64_t> readItrs = std::vector<uint64_t>(numThreads,0);
+    std::vector<uint64_t> writeItrs = std::vector<uint64_t>(numThreads,0);
+
+    bool start = false;
+    bool continueFlag = true;
+
+    RwLockType lock;
+
+    for(int i = 0; i < numThreads; i++)
+    {
+        threads.push_back(std::thread(
+                            rwRandThread<RwLockType>,
+                            std::ref(lock),
+                            std::ref(start),
+                            std::ref(continueFlag),
+                            std::ref(writeItrs[i]),
+                            std::ref(readItrs[i]),
+                            w_section,
+                            r_section,
+                            ratio));
+    }
+
+    std::this_thread::sleep_for(50ms);
+    auto startTime = std::chrono::high_resolution_clock::now();
+
+    start = true;
+
+    while(continueFlag)
+    {
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        auto dur = std::chrono::duration_cast<std::chrono::seconds>(currentTime - startTime).count();
+
+        if(dur >= seconds)
+        {
+           continueFlag = false; 
+        }
+
+    }
+
+    for(int i = 0; i < numThreads; i++)
+    {
+        threads[i].join();
+    }
+
+    uint64_t totalReads = std::accumulate(readItrs.begin(), readItrs.end(),0);
+    uint64_t totalWrites = std::accumulate(writeItrs.begin(), writeItrs.end(),0);
+
+    return {totalReads,totalWrites};
+}
+
+template<typename RwLockType>
 uint64_t dynamicLockTest 
 (
     const uint64_t numThreads,
@@ -304,11 +429,35 @@ uint64_t dynamicLockTest
 }
 
 template<typename RwLockType>
+void rwThrptTest2
+(
+    const int seconds,
+    const std::vector<int> threadCounts,
+    const std::string& name,
+    std::function<void()> w_section,
+    std::function<void()> r_section,
+    float ratio
+)
+{
+    for(int tcount : threadCounts)
+    {
+        auto [rs,ws] = dynamicLockTest2<RwLockType>(
+                            tcount,
+                            seconds,
+                            w_section,
+                            r_section,
+                            ratio); 
+        double rRate = rs / static_cast<double>(seconds);
+        double wRate = ws / static_cast<double>(seconds);
+        printf("%s,%d,%.2e,%.2e\n",name.c_str(),tcount,rRate,wRate);
+    }
+}
+
+template<typename RwLockType>
 void rwThrptTests
 (
     const int seconds,
     const std::vector<int> threadCounts,
-    const int trials,
     const std::string& name,
     const ThreadFn<RwLockType> fn
 )
@@ -316,13 +465,9 @@ void rwThrptTests
     for(int tcount : threadCounts)
     {
         printf("%s,%d,",name.c_str(),tcount);
-        for(int i = 0 ; i < trials; i++)
-        {
-            uint64_t itrs = dynamicLockTest<RwLockType>(tcount,seconds,fn); 
-            double itrRate = itrs / static_cast<double>(seconds);
-            printf("%.2e",itrRate);
-        }
-        printf("\n");
+        uint64_t itrs = dynamicLockTest<RwLockType>(tcount,seconds,fn); 
+        double itrRate = itrs / static_cast<double>(seconds);
+        printf("%.2e\n",itrRate);
     }
 }
 
@@ -410,7 +555,7 @@ struct TestOptions
     std::string name = "";
     std::string lockType = "";
     std::string csType = "";
-    float writeRatio = 0.1;
+    float writeRatio = 10.0;
     int stride = 8;
     int strideThreshold = 32;
 
@@ -426,7 +571,6 @@ void doCsTest(const TestOptions& opt)
         rwThrptTests<lock>(
             opt.time,
             getCompConfig(threads,opt.stride,opt.strideThreshold),
-            1,
             opt.name +","+opt.csType,
             &rwEmptyThread<lock>);
     }
@@ -435,9 +579,18 @@ void doCsTest(const TestOptions& opt)
         rwThrptTests<lock>(
             opt.time,
             getCompConfig(threads,opt.stride,opt.strideThreshold),
-            1,
             opt.name +","+opt.csType,
             &rwSmallWork<lock>);
+    }
+    else if(opt.csType == "empty-cs-2")
+    {
+        rwThrptTest2<lock>(
+            opt.time,
+            getCompConfig(threads,opt.stride,opt.strideThreshold),
+            opt.name +","+opt.csType,
+            [](){},
+            [](){},
+            opt.writeRatio);
     }
 }
 
@@ -464,7 +617,7 @@ void runTest
     }
     else
     {
-        printf("Unknown lock type:",opt.lockType.c_str());
+        printf("Unknown lock type: %s",opt.lockType.c_str());
     }
 }
 
@@ -507,6 +660,12 @@ int main(int argc, char** argv)
             [&](const std::string& s)
             {
                 test.strideThreshold = Utils::strToInt(s);
+            },true);
+
+    parser.addOption("--ratio",
+            [&](const std::string& s)
+            {
+                test.writeRatio = Utils::strToFloat(s);
             },true);
 
     parser.parse(argc,argv);

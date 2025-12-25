@@ -38,6 +38,14 @@ int Utils::strToInt(std::string s)
     return ret;
 }
 
+float Utils::strToFloat(std::string s)
+{
+    std::stringstream intss(s);
+    float ret;
+    intss >> ret;
+    return ret;
+}
+
 uint64_t Utils::strToULong(std::string s)
 {
     std::istringstream intss(s);

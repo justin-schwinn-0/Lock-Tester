@@ -19,6 +19,7 @@ public:
     static std::vector<std::string> split(std::string str, std::string delim);
     
     static int strToInt(std::string s);
+    static float strToFloat(std::string s);
     static uint64_t strToULong(std::string s);
     
     template<typename T>
