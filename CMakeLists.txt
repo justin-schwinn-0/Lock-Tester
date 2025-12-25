@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22.1)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 23)
 
 project(LockTester)
 
@@ -26,6 +26,7 @@ set(Sources
     CrmrRwLock.cpp
     MrwLock.cpp
     MrwLockOpt.cpp
+    OptionParser.cpp
 )
 
 set(Headers
@@ -46,6 +47,7 @@ set(Headers
     CrmrRwLock.h
     MrwLock.h
     MrwLockOpt.h
+    OptionParser.h
 )
 
 add_executable(${PROJECT_NAME} ${Sources} ${Headers})
