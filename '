@@ -175,6 +175,69 @@ std::tuple<uint64_t,uint64_t,uint64_t> runRwTest
     return tup;
 }
 
+template<typename RwLockType>
+std::pair<uint64_t, uint64_t> dynamicLockTestRandDist 
+(
+    const uint64_t numThreads,
+    const int seconds,
+    std::function<void()> w_section,
+    std::function<void()> r_section,
+    float ratio
+)
+{
+    using namespace std::chrono_literals;
+    std::vector<std::thread> threads;
+
+    std::vector<uint64_t> readItrs = std::vector<uint64_t>(numThreads,0);
+    std::vector<uint64_t> writeItrs = std::vector<uint64_t>(numThreads,0);
+
+    bool start = false;
+    bool continueFlag = true;
+
+    RwLockType lock;
+
+    for(int i = 0; i < numThreads; i++)
+    {
+        threads.push_back(std::thread(
+                            rwRandThread<RwLockType>,
+                            std::ref(lock),
+                            std::ref(start),
+                            std::ref(continueFlag),
+                            std::ref(writeItrs[i]),
+                            std::ref(readItrs[i]),
+                            w_section,
+                            r_section,
+                            ratio));
+    }
+
+    std::this_thread::sleep_for(50ms);
+    auto startTime = std::chrono::high_resolution_clock::now();
+
+    start = true;
+
+    while(continueFlag)
+    {
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        auto dur = std::chrono::duration_cast<std::chrono::seconds>(currentTime - startTime).count();
+
+        if(dur >= seconds)
+        {
+           continueFlag = false; 
+        }
+
+    }
+
+    for(int i = 0; i < numThreads; i++)
+    {
+        threads[i].join();
+    }
+
+    uint64_t totalReads = std::accumulate(readItrs.begin(), readItrs.end(),0);
+    uint64_t totalWrites = std::accumulate(writeItrs.begin(), writeItrs.end(),0);
+
+    return {totalReads,totalWrites};
+}
+
 
 // run a 90-10 R-W test for [seconds] number of seconds
 // run a test for each thread count in [threadCounts]
@@ -276,40 +339,35 @@ struct TestOptions
     int stride = 8;
     int strideThreshold = 32;
     bool verbose = false;
-    std::function<bool()> distribution;
-    std::function<void()> w_section;
-    std::function<void()> r_section;
+
 };
 
 template<class RwLock>
 void rwThrptTest
 (
-    const TestOptions& opt
+    const TestOptions& opt,
+    std::function<bool()> distribution,
+    std::function<void()> w_section,
+    std::function<void()> r_section,
 )
 {
-    using namespace std::chrono_literals;
     int maxThreads = std::thread::hardware_concurrency();
     auto config = getCompConfig(maxThreads,opt.stride,opt.strideThreshold);
-
-    auto dist = opt.distribution;
-    auto w_section = opt.w_section;
-    auto r_section = opt.r_section;
-
     for(int numThreads : config)
     {
         RwLock lock;
 
         bool startBarrier = false;
 
-        bool continueFlag = true;
+        bool continue = true;
 
         auto thread = [&](uint64_t& wItrs, uint64_t& rItrs)
         {
             while(!startBarrier);
 
-            while(continueFlag)
+            while(continue)
             {
-                if(dist())
+                if(distribution())
                 {
                     //write
                     lock.writeLock();
@@ -343,14 +401,14 @@ void rwThrptTest
         std::this_thread::sleep_for(50ms);
         auto startTime = std::chrono::high_resolution_clock::now();
 
-        startBarrier = true;
+        start = true;
 
         while(continueFlag)
         {
             auto currentTime = std::chrono::high_resolution_clock::now();
             auto dur = std::chrono::duration_cast<std::chrono::seconds>(currentTime - startTime).count();
 
-            if(dur >= opt.time)
+            if(dur >= seconds)
             {
                continueFlag = false; 
             }
@@ -365,28 +423,26 @@ void rwThrptTest
 }
 
 
-void chooseSection
+std::function<void()> chooseSection
 (
-    TestOptions& opt
+    const TestOptions& opt
 )
 {
-
-    std::function<void()> read,write;
     if(opt.csType == "empty")
     {
-        opt.r_section = [](){};
-        opt.w_section = [](){};
+
     }
-    else
+    else 
     {
-        opt.r_section = [](){};
-        opt.w_section = [](){};
+        // by default return a 1 in 10 write, 9 in 10 read
+        return []()
+        {
+        };
     }
 }
-
-void chooseDist
+std::function<bool()> chooeDist
 (
-    TestOptions& opt
+    const TestOptions& opt
 )
 {
     if(opt.distType == "random")
@@ -396,7 +452,7 @@ void chooseDist
     else 
     {
         // by default return a 1 in 10 write, 9 in 10 read
-        opt.distribution = []()
+        return []()
         {
             static thread_local int counter = 0;
             counter++;
@@ -411,6 +467,11 @@ void runTest
     const TestOptions& opt
 )
 {
+
+    std::function<bool()> dist = chooseDist(opt);
+
+    auto [readSection,writeSection] = chooseSection(opt);
+
     if(opt.lockType == "mrw-opt")
     {
         rwThrptTest<MrwLockOpt>(opt);
@@ -509,7 +570,5 @@ int main(int argc, char** argv)
         std::exit(1);
     }
     
-    chooseDist(test);
-    chooseSection(test);
     runTest(test);
 }
