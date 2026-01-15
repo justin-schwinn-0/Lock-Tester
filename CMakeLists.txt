@@ -46,7 +46,6 @@ set(Headers
     BaseRwLock.h
     CrmrRwLock.h
     MrwLock.h
-    MrwLockOpt.h
     OptionParser.h
 )
 

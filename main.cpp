@@ -27,6 +27,9 @@
 #include "CrmrRwLock.h"
 #include "MrwLock.h"
 #include "MrwLockOpt.h"
+#include "MrwLockOpt.h"
+#include "McsRwNpGpt.h"
+#include "McsRwRpGrok.h"
 
 #include "OptionParser.h"
 
@@ -211,6 +214,41 @@ void rwEmptyThread
     }
 }
 
+std::vector<int32_t> dkWorkVec = std::vector<int32_t>(64);
+
+template<class RwLockType>
+void rwDiceKoganThread
+(
+    rwlock& lock,
+    bool& startBarrier,
+    bool& continueFlag,
+    uint64_t& w_iterations,
+    uint64_t& r_iterations,
+    std::function<void()> writeSection,
+    std::function<void()> readSection,
+    float writeRatio
+)
+{
+    std::default_random_engine engine(static_cast<unsigned int>(std::time(nullptr)));
+    std::uniform_real_distribution<float> dist(0.0f,100.0f);
+    while(!startBarrier);
+
+    while(continueFlag)
+    {
+        iterations++;
+        if(rem == 0)
+        {
+            lock.writeLock();
+            lock.writeUnlock();
+        }
+        else
+        {
+            lock.readLock();
+            lock.readUnlock();
+        }
+    }
+}
+
 std::vector<uint64_t> smallWorkVec = std::vector<uint64_t>(16,16);
 
 template<class RwLockType>
@@ -311,7 +349,7 @@ std::tuple<uint64_t,uint64_t,uint64_t> runRwTest
 }
 
 template<typename RwLockType>
-std::pair<uint64_t, uint64_t> dynamicLockTest2 
+std::pair<uint64_t, uint64_t> dynamicLockTestRandDist 
 (
     const uint64_t numThreads,
     const int seconds,
@@ -373,63 +411,9 @@ std::pair<uint64_t, uint64_t> dynamicLockTest2
     return {totalReads,totalWrites};
 }
 
+/*
 template<typename RwLockType>
-uint64_t dynamicLockTest 
-(
-    const uint64_t numThreads,
-    const int seconds,
-    const ThreadFn<RwLockType> fn
-)
-{
-    using namespace std::chrono_literals;
-    std::vector<std::thread> threads;
-
-    std::vector<uint64_t> iterations = std::vector<uint64_t>(numThreads,0);
-
-    bool start = false;
-    bool continueFlag = true;
-
-    RwLockType lock;
-
-    for(int i = 0; i < numThreads; i++)
-    {
-        threads.push_back(std::thread(
-                            fn,
-                            std::ref(lock),
-                            std::ref(start),
-                            std::ref(continueFlag),
-                            std::ref(iterations[i])));
-    }
-
-    std::this_thread::sleep_for(50ms);
-    auto startTime = std::chrono::high_resolution_clock::now();
-
-    start = true;
-
-    while(continueFlag)
-    {
-        auto currentTime = std::chrono::high_resolution_clock::now();
-        auto dur = std::chrono::duration_cast<std::chrono::seconds>(currentTime - startTime).count();
-
-        if(dur >= seconds)
-        {
-           continueFlag = false; 
-        }
-
-    }
-
-    for(int i = 0; i < numThreads; i++)
-    {
-        threads[i].join();
-    }
-
-    uint64_t totalIterations = std::accumulate(iterations.begin(), iterations.end(),0);
-
-    return totalIterations;
-}
-
-template<typename RwLockType>
-void rwThrptTest2
+void rwThrptTestRandDist
 (
     const int seconds,
     const std::vector<int> threadCounts,
@@ -441,7 +425,7 @@ void rwThrptTest2
 {
     for(int tcount : threadCounts)
     {
-        auto [rs,ws] = dynamicLockTest2<RwLockType>(
+        auto [rs,ws] = dynamicLockTestRandDist<RwLockType>(
                             tcount,
                             seconds,
                             w_section,
@@ -470,6 +454,7 @@ void rwThrptTests
         printf("%.2e\n",itrRate);
     }
 }
+*/
 
 // run a 90-10 R-W test for [seconds] number of seconds
 // run a test for each thread count in [threadCounts]
@@ -479,10 +464,11 @@ void runRwCorrectnessTestsForLock
 (
     const uint64_t seconds, 
     const std::vector<int> threadCounts,
-    const std::string name
+    const std::string name,
+    const bool verbose
 )
 {
-    printf("Running \"Correctness\" test for %s",name.c_str());
+    printf("Running \"Correctness\" test for %s\n",name.c_str());
     uint64_t totalWriteFails = 0;
     uint64_t totalReadFails = 0;
     uint64_t totalIterations = 0;
@@ -494,6 +480,16 @@ void runRwCorrectnessTestsForLock
         totalWriteFails += wFails;
         totalReadFails += rFails;
         totalIterations += itrs;
+
+        if(verbose)
+        {
+            double rate = itrs/ static_cast<double>(seconds);
+            printf("T: %d   -> %.3e /s, %ld write fails, %ld read fails\n",
+                    tCount,
+                    rate,
+                    wFails,
+                    rFails);
+        }
     }
 
     double avgWriteFails = static_cast<double>(totalWriteFails) / threadCounts.size();
@@ -554,19 +550,31 @@ struct TestOptions
     int time = -1;
     std::string name = "";
     std::string lockType = "";
+    std::string distType = "";
     std::string csType = "";
     float writeRatio = 10.0;
     int stride = 8;
     int strideThreshold = 32;
+    bool verbose = false;
 
 };
+
 
 template<typename lock>
 void doCsTest(const TestOptions& opt)
 {
     int threads = std::thread::hardware_concurrency();
 
-    if(opt.csType == "empty-cs")
+    if(opt.csType == "correctness")
+    {
+        runRwCorrectnessTestsForLock<lock>(
+            opt.time,
+            getCompConfig(threads,opt.stride,opt.strideThreshold),
+            opt.lockType,
+            opt.verbose);
+    }
+
+    else if(opt.csType == "empty-cs")
     {
         rwThrptTests<lock>(
             opt.time,
@@ -591,6 +599,29 @@ void doCsTest(const TestOptions& opt)
             [](){},
             [](){},
             opt.writeRatio);
+    }
+    else
+    {
+        printf("Unknown test Type! %s",opt.csType.c_str());
+    }
+}
+
+void doDistribution
+(
+    const TestOptions& opt
+)
+{
+    if(opt.distType == "static")
+    {
+
+    }
+    else if(opt.distType == "random")
+    {
+
+    }
+    else 
+    {
+        printf("Unknown Distribution function: %s", opt.distType.c_str());
     }
 }
 
@@ -667,6 +698,12 @@ int main(int argc, char** argv)
             {
                 test.writeRatio = Utils::strToFloat(s);
             },true);
+
+    parser.addOption("-v",
+            [&](const std::string& s)
+            {
+                test.verbose = true;
+            },false);
 
     parser.parse(argc,argv);
 
