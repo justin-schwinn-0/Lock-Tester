@@ -110,6 +110,41 @@ void RwThreadCorrectness
         }
     }
 }
+
+
+std::vector<uint64_t> smallWorkVec = std::vector<uint64_t>(16,16);
+
+template<class RwLockType>
+void rwSmallWork 
+(
+    RwLockType& lock,
+    bool& startBarrier,
+    bool& continueFlag,
+    uint64_t& iterations
+)
+{
+    pid_t pid = getpid();
+    while(!startBarrier);
+
+    while(continueFlag)
+    {
+        int rem = iterations % 10;
+        iterations++;
+        if(rem == 0)
+        {
+            lock.writeLock();
+            writeTest(smallWorkVec,pid);
+            lock.writeUnlock();
+        }
+        else
+        {
+            lock.readLock();
+            readTest(smallWorkVec);
+            lock.readUnlock();
+        }
+    }
+}
+/*
 template<class rwlock>
 void rwThread
 (
@@ -248,39 +283,7 @@ void rwDiceKoganThread
         }
     }
 }
-
-std::vector<uint64_t> smallWorkVec = std::vector<uint64_t>(16,16);
-
-template<class RwLockType>
-void rwSmallWork 
-(
-    RwLockType& lock,
-    bool& startBarrier,
-    bool& continueFlag,
-    uint64_t& iterations
-)
-{
-    pid_t pid = getpid();
-    while(!startBarrier);
-
-    while(continueFlag)
-    {
-        int rem = iterations % 10;
-        iterations++;
-        if(rem == 0)
-        {
-            lock.writeLock();
-            writeTest(smallWorkVec,pid);
-            lock.writeUnlock();
-        }
-        else
-        {
-            lock.readLock();
-            readTest(smallWorkVec);
-            lock.readUnlock();
-        }
-    }
-}
+*/
 
 template<class RwLockType>
 std::tuple<uint64_t,uint64_t,uint64_t> runRwTest
@@ -559,6 +562,18 @@ struct TestOptions
 
 };
 
+void rwThrptTest
+(
+    const TestOptions& opt,
+    const std::vector<int> threadCounts,
+    std::function<bool()> distribution
+    std::function<void()> w_section,
+    std::function<void()> r_section,
+)
+{
+
+}
+
 
 template<typename lock>
 void doCsTest(const TestOptions& opt)
@@ -613,7 +628,7 @@ void doDistribution
 {
     if(opt.distType == "static")
     {
-
+        
     }
     else if(opt.distType == "random")
     {
