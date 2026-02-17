@@ -32,9 +32,37 @@ public:
     void performAquire(mrwo_qnode* node);
     void performRelease(mrwo_qnode* node);
 
-    bool isLocked(uint32_t counter);
-    void setLocked(mrwo_qnode* node, bool set);
-    void resetNode(mrwo_qnode* node);
+    inline bool isLocked(uint32_t counter)
+    {
+        return (counter & 0x80000000) > 0; 
+    }
+
+    inline void setLocked(mrwo_qnode* node, bool set)
+    {
+        if(set)
+        {
+            node->count.fetch_or(LAST_BIT_MASK);
+        }
+        else
+        {
+            node->count.fetch_and(~LAST_BIT_MASK);
+
+            /*if(node->count > 0)
+            {
+                totalReaders.fetch_add(node->count.load());
+                totalReads.fetch_add(1);
+            }*/
+        }
+
+        node->locked = set;
+    }
+
+    inline void resetNode(mrwo_qnode* node)
+    {
+        node->count.store(0);
+        node->next.store(nullptr);
+        setLocked(node,true);
+    }
 
     inline bool spin(mrwo_qnode* node)
     {
@@ -47,6 +75,14 @@ public:
 private:
     std::atomic<mrwo_qnode*> mTail;
 
+    std::atomic<uint64_t> successes;
+    std::atomic<uint64_t> misses;
+    std::atomic<uint64_t> lockedOut;
+    std::atomic<uint64_t> totalReaders;
+    std::atomic<uint64_t> totalReads;
+
+
     static constexpr uint32_t LOCKED_READING_START_MASK = 0x80000001;
     static constexpr uint32_t LAST_BIT_MASK = 1 << 31; 
 };
+

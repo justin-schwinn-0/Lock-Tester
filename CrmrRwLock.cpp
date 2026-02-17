@@ -13,6 +13,7 @@ CrmrRwLock::CrmrRwLock():
     mLock(McsLock(0))
 {
 }
+
 CrmrRwLock::~CrmrRwLock()
 {
 }

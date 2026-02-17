@@ -1,30 +1,23 @@
-#include "MrwLockOpt.h"
+#include "MrwNaOpt.h"
 
 #include <thread>
 #include <cstdio>
 
-static thread_local mrwo_qnode mine[2];
-static thread_local mrwo_qnode* myTarget;
+#include <sched.h>
+
+static thread_local mrwnao_qnode mine[2];
+static thread_local mrwnao_qnode* myTarget;
 static thread_local int cur = 0;
 
-MrwLockOpt::MrwLockOpt():
+MrwNaOptLock::MrwNaOptLock():
     mTail(nullptr)
 {
 }
-MrwLockOpt::~MrwLockOpt()
+MrwNaOptLock::~MrwNaOptLock()
 {
-    /*
-    printf("Lock successes %lu times\n",successes.load());
-    printf("Lock Missed    %lu times\n",misses.load());
-    printf("Locked out     %lu times\n",lockedOut.load());
-
-    double avgReaders = static_cast<double>(totalReaders.load()) / totalReads.load();
-
-    printf("Average readers per read node %f times\n",avgReaders);
-    */
 }
 
-void MrwLockOpt::writeLock()
+void MrwNaOptLock::writeLock()
 {
     myTarget = nullptr;
     cur = 1 - cur;
@@ -32,12 +25,12 @@ void MrwLockOpt::writeLock()
     performAquire(&mine[cur]);
 }
 
-void MrwLockOpt::writeUnlock()
+void MrwNaOptLock::writeUnlock()
 {
     performRelease(&mine[cur]);
 }
 
-void MrwLockOpt::readLock()
+void MrwNaOptLock::readLock()
 {
     bool makeOwnNode = false;
     do
@@ -46,18 +39,21 @@ void MrwLockOpt::readLock()
 
         if(myTarget)
         {
+            auto& numaCntr = myTarget->numaCounter;
+            uint32_t grpId = getGroup();
+            if(!numaCntr.check(grpId))
+            {
+                continue;
+            }
+
+            while(!numaCntr.tryInc(grpId));
+
             uint32_t unmaskedCount = myTarget->count.load();
             uint32_t curCount = unmaskedCount & (~LAST_BIT_MASK);
             uint32_t newCount = unmaskedCount+ 1;
 
-            if(curCount == 0 )
+            if(curCount == 0 || !isLocked(unmaskedCount))
             {
-                makeOwnNode = true;
-                continue;
-            }
-            else if(!isLocked(unmaskedCount))
-            {
-                //lockedOut.fetch_add(1);
                 makeOwnNode = true;
                 continue;
             }
@@ -65,9 +61,11 @@ void MrwLockOpt::readLock()
             {
                 if(myTarget->count.compare_exchange_strong(unmaskedCount,newCount))
                 {
-                    //successes.fetch_add(1);
                     // cas successful, spin on target
-                    while(spin(myTarget)) {}
+                    while(spin(myTarget))
+                    {
+                        std::this_thread::yield();
+                    }
                     return;
                 }
                 else
@@ -77,13 +75,11 @@ void MrwLockOpt::readLock()
                     if(isLocked(unmaskedCount))
                     {
                         newCount = unmaskedCount + 1;
-                        //misses.fetch_add(1);
                     }
                     else
                     {
                         // go make own node
                         makeOwnNode = true;
-                        //lockedOut.fetch_add(1);
                         break;
                     }
                 }
@@ -106,7 +102,7 @@ void MrwLockOpt::readLock()
 
 }
 
-void MrwLockOpt::readUnlock()
+void MrwNaOptLock::readUnlock()
 {
     uint32_t curCount = myTarget->count.fetch_sub(1);
     if(curCount == 1)
@@ -115,9 +111,9 @@ void MrwLockOpt::readUnlock()
     }
 }
 
-void MrwLockOpt::performAquire(mrwo_qnode* node)
+void MrwNaOptLock::performAquire(mrwnao_qnode* node)
 {
-    mrwo_qnode* pred = mTail.exchange(node);
+    mrwnao_qnode* pred = mTail.exchange(node);
 
     if(pred)
     {
@@ -125,7 +121,10 @@ void MrwLockOpt::performAquire(mrwo_qnode* node)
         pred->next.store(node);
 
         // while locked==true
-        while(spin(node)){}
+        while(spin(node))
+        {
+            std::this_thread::yield();
+        }
     }
     else
     {
@@ -133,13 +132,13 @@ void MrwLockOpt::performAquire(mrwo_qnode* node)
     }
 }
 
-void MrwLockOpt::performRelease(mrwo_qnode* node)
+void MrwNaOptLock::performRelease(mrwnao_qnode* node)
 {
-    mrwo_qnode* next = node->next.load();
+    mrwnao_qnode* next = node->next.load();
     if(next == nullptr)
     {
-        mrwo_qnode* tmp = node;
-        if(mTail.compare_exchange_strong(tmp,static_cast<mrwo_qnode*>(nullptr)))
+        mrwnao_qnode* tmp = node;
+        if(mTail.compare_exchange_strong(tmp,static_cast<mrwnao_qnode*>(nullptr)))
         {
             return;
         }
@@ -147,7 +146,7 @@ void MrwLockOpt::performRelease(mrwo_qnode* node)
         while(!next) 
         {
             next = node->next.load();
-            //std::this_thread::yield();
+            std::this_thread::yield();
         }
     }
 
@@ -157,9 +156,35 @@ void MrwLockOpt::performRelease(mrwo_qnode* node)
     }
 }
 
-void MrwLockOpt::print()
+bool MrwNaOptLock::isLocked(uint32_t counter)
 {
-    mrwo_qnode* node = &mine[cur];
+    return (counter & 0x80000000) > 0; 
+}
+
+void MrwNaOptLock::setLocked(mrwnao_qnode* node, bool set)
+{
+    if(set)
+    {
+        node->count.fetch_or(LAST_BIT_MASK);
+    }
+    else
+    {
+        node->count.fetch_and(~LAST_BIT_MASK);
+    }
+
+    node->locked = set;
+}
+
+void MrwNaOptLock::resetNode(mrwnao_qnode* node)
+{
+    node->count.store(0);
+    node->next.store(nullptr);
+    setLocked(node,true);
+}
+
+void MrwNaOptLock::print()
+{
+    mrwnao_qnode* node = &mine[cur];
     while(node)
     {
         printf("{%x}->",node->count.load());
@@ -167,4 +192,21 @@ void MrwLockOpt::print()
     }
     printf("\n");
 
+}
+
+uint32_t MrwNaOptLock::getGroup()
+{
+    static thread_local uint32_t groupId = 0;
+    if(groupId == 0)
+    {
+        if(sGroupFunction)
+        {
+            groupId = sGroupFunction();
+        }
+        else
+        {
+            groupId = 1;
+        }
+    }
+    return groupId;
 }

@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <ctime>
 #include <random>
+#include <sched.h>
 
 //mutex locks
 #include "Utils.h"
@@ -27,7 +28,8 @@
 #include "CrmrRwLock.h"
 #include "MrwLock.h"
 #include "MrwLockOpt.h"
-#include "MrwLockOpt.h"
+#include "CrmrRwLockR.h"
+#include "MrwNaOpt.h"
 
 #include "OptionParser.h"
 
@@ -272,6 +274,7 @@ struct TestOptions
     std::string lockType = "";
     std::string distType = "";
     std::string csType = "";
+    std::string groupFunc = "";
     float writeRatio = 10.0;
     int stride = 8;
     int strideThreshold = 32;
@@ -279,6 +282,11 @@ struct TestOptions
     std::function<bool()> distribution;
     std::function<void()> w_section;
     std::function<void()> r_section;
+};
+
+struct Aligned64bUint
+{
+    alignas(64) uint64_t value;
 };
 
 template<class RwLock>
@@ -297,13 +305,14 @@ void rwThrptTest
 
     for(int numThreads : config)
     {
+
         RwLock lock;
 
         bool startBarrier = false;
 
         bool continueFlag = true;
 
-        auto thread = [&](uint64_t& wItrs, uint64_t& rItrs)
+        auto thread = [&](Aligned64bUint& wItrs, Aligned64bUint& rItrs)
         {
             while(!startBarrier);
 
@@ -315,7 +324,7 @@ void rwThrptTest
                     lock.writeLock();
                     w_section();
                     lock.writeUnlock();
-                    wItrs++;
+                    wItrs.value++;
                 }
                 else
                 {
@@ -323,14 +332,14 @@ void rwThrptTest
                     lock.readLock();
                     r_section();
                     lock.readUnlock();
-                    rItrs++;
+                    rItrs.value++;
                 }
             }
         };
 
         std::vector<std::thread> threads;
-        std::vector<uint64_t> writeIterations = std::vector<uint64_t>(numThreads,0);
-        std::vector<uint64_t> readIterations = std::vector<uint64_t>(numThreads,0);
+        std::vector<Aligned64bUint> writeIterations = std::vector<Aligned64bUint>(numThreads,{0});
+        std::vector<Aligned64bUint> readIterations =  std::vector<Aligned64bUint>(numThreads,{0});
 
         for(int i = 0; i < numThreads;i++)
         {
@@ -342,12 +351,14 @@ void rwThrptTest
 
         std::this_thread::sleep_for(50ms);
         auto startTime = std::chrono::high_resolution_clock::now();
+        auto currentTime = std::chrono::high_resolution_clock::now();
 
         startBarrier = true;
 
+
         while(continueFlag)
         {
-            auto currentTime = std::chrono::high_resolution_clock::now();
+            currentTime = std::chrono::high_resolution_clock::now();
             auto dur = std::chrono::duration_cast<std::chrono::seconds>(currentTime - startTime).count();
 
             if(dur >= opt.time)
@@ -361,6 +372,35 @@ void rwThrptTest
         {
             threads[i].join();
         }
+
+        uint64_t totalWrites = 0; 
+        uint64_t totalReads = 0; 
+
+        for(auto intStruct : writeIterations)
+        {
+            totalWrites += intStruct.value;
+        }
+
+        for(auto intStruct : readIterations)
+        {
+            totalReads += intStruct.value;
+        }
+
+
+        double writeRate = totalWrites/static_cast<double>(opt.time);
+        double readRate = totalReads/static_cast<double>(opt.time);
+
+        double combinedRate = writeRate + readRate;
+
+        printf("%s,%s,%s,%f,%d,%.3e,%.3e,%.3e\n",
+                opt.name.c_str(),
+                opt.lockType.c_str(),
+                opt.csType.c_str(),
+                opt.writeRatio,
+                numThreads,
+                writeRate,
+                readRate,
+                combinedRate);
     }
 }
 
@@ -370,12 +410,19 @@ void chooseSection
     TestOptions& opt
 )
 {
-
-    std::function<void()> read,write;
     if(opt.csType == "empty")
     {
         opt.r_section = [](){};
         opt.w_section = [](){};
+    }
+    else if(opt.csType == "print")
+    {
+        opt.r_section = [](){};
+        opt.w_section = []()
+        {
+            int cpuId =sched_getcpu();
+            printf("Running on CPU: %d\n",cpuId);
+        };
     }
     else
     {
@@ -406,6 +453,25 @@ void chooseDist
     }
 }
 
+void chooseGroupFunc
+(
+    TestOptions& opt
+)
+{
+    std::function<uint32_t()> grpFunc;
+    if(opt.groupFunc == "smt_grp1")
+    {
+        grpFunc = []()
+        {
+            int cpuSize = std::thread::hardware_concurrency();
+            int cpuId = sched_getcpu();
+
+            return cpuId % (cpuSize/2);
+        };
+    }
+    MrwNaOptLock::setGroupFunction(grpFunc);
+}
+
 void runTest
 (
     const TestOptions& opt
@@ -423,13 +489,17 @@ void runTest
     {
         rwThrptTest<CrmrRwLock>(opt);
     }
+    else if(opt.lockType == "crmr-r")
+    {
+        rwThrptTest<CrmrRwLockR>(opt);
+    }
     else if(opt.lockType == "cpp-std")
     {
         rwThrptTest<BaseRwLock>(opt);
     }
     else
     {
-        printf("Unknown lock type: %s",opt.lockType.c_str());
+        printf("Unknown lock type: %s\n",opt.lockType.c_str());
     }
 }
 
@@ -480,6 +550,12 @@ int main(int argc, char** argv)
                 test.writeRatio = Utils::strToFloat(s);
             },true);
 
+    parser.addOption("--groupFunc",
+            [&](const std::string& s)
+            {
+                test.groupFunc = s;
+            },true);
+
     parser.addOption("-v",
             [&](const std::string& s)
             {
@@ -508,8 +584,11 @@ int main(int argc, char** argv)
         printf("Test must have positive time\n");
         std::exit(1);
     }
+
     
     chooseDist(test);
     chooseSection(test);
+    chooseGroupFunc(test);
+    //runRwCorrectnessTestsForLock<CrmrRwLockR>(1,{4,8,16},"CRMR-R 7800x3d",true);
     runTest(test);
 }

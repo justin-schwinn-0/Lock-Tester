@@ -24,8 +24,10 @@ set(Sources
     McsLock.cpp
     CnaLock.cpp
     CrmrRwLock.cpp
+    CrmrRwLockR.cpp
     MrwLock.cpp
     MrwLockOpt.cpp
+    MrwNaOpt.cpp
     OptionParser.cpp
 )
 
@@ -45,7 +47,10 @@ set(Headers
     CnaLock.h
     BaseRwLock.h
     CrmrRwLock.h
+    CrmrRwLockR.h
     MrwLock.h
+    MrwLockOpt.h
+    MrwNaOpt.h
     OptionParser.h
 )
 
