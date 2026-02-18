@@ -82,7 +82,7 @@ private:
     std::atomic<uint64_t> totalReads;
 
 
-    static constexpr uint32_t LOCKED_READING_START_MASK = 0x80000001;
+    //static constexpr uint32_t LOCKED_READING_START_MASK = 0x80000001;
     static constexpr uint32_t LAST_BIT_MASK = 1 << 31; 
 };
 

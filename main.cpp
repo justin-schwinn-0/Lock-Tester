@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <ctime>
 #include <random>
+#include <cmath>
 #include <sched.h>
 
 //mutex locks
@@ -440,6 +441,17 @@ void chooseDist
     {
 
     }
+    else if(opt.distType == "static")
+    {
+        int ratio = opt.writeRatio;
+        opt.distribution = [=]()
+        {
+            static thread_local double counter = 0;
+            counter += 1;
+
+            return std::fmod(counter,100.0) < ratio;
+        };
+    }
     else 
     {
         // by default return a 1 in 10 write, 9 in 10 read
@@ -548,6 +560,12 @@ int main(int argc, char** argv)
             [&](const std::string& s)
             {
                 test.writeRatio = Utils::strToFloat(s);
+            },true);
+
+    parser.addOption("--distType",
+            [&](const std::string& s)
+            {
+                test.distType = s;
             },true);
 
     parser.addOption("--groupFunc",

@@ -13,16 +13,16 @@ public:
     BaseRwLock& operator=(BaseRwLock&) = delete;
     BaseRwLock& operator=(BaseRwLock&&) = delete;
     
-    void readLock()
+    inline void readLock()
     { lock.lock_shared();}
 
-    void readUnlock()
+    inline void readUnlock()
     { lock.unlock_shared();}
 
-    void writeLock()
+    inline void writeLock()
     { lock.lock();}
 
-    void writeUnlock()
+    inline void writeUnlock()
     { lock.unlock();}
 
 private:

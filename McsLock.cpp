@@ -24,7 +24,7 @@ void McsLock::aquire(uint32_t me)
 
         while(mine.locked)
         {
-            std::this_thread::yield();
+            //std::this_thread::yield();
         }
     }
 }
@@ -40,7 +40,7 @@ void McsLock::release(uint32_t me)
         }
         while(!mine.next) 
         {
-            std::this_thread::yield();
+            //std::this_thread::yield();
         }
     }
 

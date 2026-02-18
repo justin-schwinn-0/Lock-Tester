@@ -50,14 +50,8 @@ void MrwLockOpt::readLock()
             uint32_t curCount = unmaskedCount & (~LAST_BIT_MASK);
             uint32_t newCount = unmaskedCount+ 1;
 
-            if(curCount == 0 )
+            if(curCount == 0 || !isLocked(unmaskedCount))
             {
-                makeOwnNode = true;
-                continue;
-            }
-            else if(!isLocked(unmaskedCount))
-            {
-                //lockedOut.fetch_add(1);
                 makeOwnNode = true;
                 continue;
             }
@@ -124,7 +118,6 @@ void MrwLockOpt::performAquire(mrwo_qnode* node)
         setLocked(node,true);
         pred->next.store(node);
 
-        // while locked==true
         while(spin(node)){}
     }
     else
@@ -156,7 +149,6 @@ void MrwLockOpt::performRelease(mrwo_qnode* node)
         setLocked(next,false);
     }
 }
-
 void MrwLockOpt::print()
 {
     mrwo_qnode* node = &mine[cur];
