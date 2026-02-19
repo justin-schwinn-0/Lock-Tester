@@ -446,10 +446,10 @@ void chooseDist
         int ratio = opt.writeRatio;
         opt.distribution = [=]()
         {
-            static thread_local double counter = 0;
+            static thread_local uint32_t counter = 0;
             counter += 1;
 
-            return std::fmod(counter,100.0) < ratio;
+            return counter % 100 < ratio;
         };
     }
     else 
