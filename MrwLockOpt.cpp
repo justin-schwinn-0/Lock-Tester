@@ -28,8 +28,8 @@ void MrwLockOpt::writeLock()
 {
     myTarget = nullptr;
     cur = 1 - cur;
-    resetNode(&mine[cur]);
-    performAquire(&mine[cur]);
+    //resetNode(&mine[cur]);
+    performAquire(&mine[cur],0);
 }
 
 void MrwLockOpt::writeUnlock()
@@ -50,7 +50,7 @@ void MrwLockOpt::readLock()
             uint32_t curCount = unmaskedCount & (~LAST_BIT_MASK);
             uint32_t newCount = unmaskedCount+ 1;
 
-            if(curCount == 0 || !isLocked(unmaskedCount))
+            if(!readerCanJoin(unmaskedCount))
             {
                 makeOwnNode = true;
                 continue;
@@ -68,7 +68,7 @@ void MrwLockOpt::readLock()
                 {
                     // cas failed
                     // count inc or is no longer locked
-                    if(isLocked(unmaskedCount))
+                    if(readerCanJoin(unmaskedCount))
                     {
                         newCount = unmaskedCount + 1;
                         //misses.fetch_add(1);
@@ -93,11 +93,7 @@ void MrwLockOpt::readLock()
     cur = 1 - cur;
     myTarget = &mine[cur];
 
-    resetNode(&mine[cur]);
-
-    mine[cur].count.fetch_add(1);
-    performAquire(&mine[cur]);
-
+    performAquire(&mine[cur],1);
 }
 
 void MrwLockOpt::readUnlock()
@@ -109,8 +105,9 @@ void MrwLockOpt::readUnlock()
     }
 }
 
-void MrwLockOpt::performAquire(mrwo_qnode* node)
+void MrwLockOpt::performAquire(mrwo_qnode* node,uint32_t count)
 {
+    resetNode(node,count);
     mrwo_qnode* pred = mTail.exchange(node);
 
     if(pred)

@@ -31,6 +31,7 @@
 #include "MrwLockOpt.h"
 #include "CrmrRwLockR.h"
 #include "MrwNaOpt.h"
+#include "MrwLockSc.h"
 
 #include "OptionParser.h"
 
@@ -50,7 +51,7 @@ bool writeTest(std::vector<uint64_t>& vec,uint64_t setVal)
     // if readTest fails, a write test is happening other than mine
     if(readTest(vec))
     {
-        for(int i = 0; i < vec.size(); i++)
+        for(int i = vec.size()-1; i >= 0; i--)
         {
            vec[i] = setVal;
         }
@@ -607,6 +608,8 @@ int main(int argc, char** argv)
     chooseDist(test);
     chooseSection(test);
     chooseGroupFunc(test);
-    //runRwCorrectnessTestsForLock<CrmrRwLockR>(1,{4,8,16},"CRMR-R 7800x3d",true);
+    runRwCorrectnessTestsForLock<MrwLockOpt>(5,{4,8,8,8,8,8,8,8,8,8,15},"MRW-OPT 7800x3d",true);
+    //runRwCorrectnessTestsForLock<MrwLockOpt>(2,std::vector<int>(100,8),"MRW-OPT 7800x3d",true);
+    //runRwCorrectnessTestsForLock<CrmrRwLock>(10,{4,8,15},"CRMR-WP 7800x3d",true);
     runTest(test);
 }

@@ -9,7 +9,7 @@ struct mrwo_qnode
 {
     // cap of 2^31, bit 31 is for locked
     alignas(64) std::atomic<uint32_t> count;
-    alignas(64) bool locked;
+    alignas(64) std::atomic<bool> locked;
     std::atomic<mrwo_qnode*> next;
 };
 
@@ -29,7 +29,7 @@ public:
     void writeLock();
     void writeUnlock();
 
-    void performAquire(mrwo_qnode* node);
+    void performAquire(mrwo_qnode* node,uint32_t count);
     void performRelease(mrwo_qnode* node);
 
     inline bool isLocked(uint32_t counter)
@@ -54,20 +54,25 @@ public:
             }*/
         }
 
-        node->locked = set;
+        node->locked.store(set);
     }
 
-    inline void resetNode(mrwo_qnode* node)
+    inline void resetNode(mrwo_qnode* node,uint32_t count = 0)
     {
-        node->count.store(0);
+        node->count.store((count | LAST_BIT_MASK));
         node->next.store(nullptr);
-        setLocked(node,true);
+        node->locked.store(true);
     }
 
     inline bool spin(mrwo_qnode* node)
     {
         return node->locked;
         //return isLocked(node->count.load());
+    }
+
+    inline bool readerCanJoin(uint32_t count)
+    {
+        return count >= LOCKED_READING_START_MASK;
     }
 
     void print();
@@ -82,7 +87,7 @@ private:
     std::atomic<uint64_t> totalReads;
 
 
-    //static constexpr uint32_t LOCKED_READING_START_MASK = 0x80000001;
+    static constexpr uint32_t LOCKED_READING_START_MASK = 0x80000001;
     static constexpr uint32_t LAST_BIT_MASK = 1 << 31; 
 };
 
