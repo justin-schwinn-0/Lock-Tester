@@ -357,19 +357,9 @@ void rwThrptTest
 
         startBarrier = true;
 
+        std::this_thread::sleep_for(std::chrono::seconds(opt.time));
 
-        while(continueFlag)
-        {
-            currentTime = std::chrono::high_resolution_clock::now();
-            auto dur = std::chrono::duration_cast<std::chrono::seconds>(currentTime - startTime).count();
-
-            if(dur >= opt.time)
-            {
-               continueFlag = false; 
-            }
-
-        }
-
+        continueFlag = false; 
         for(int i = 0; i < numThreads; i++)
         {
             threads[i].join();
@@ -438,9 +428,43 @@ void chooseDist
     TestOptions& opt
 )
 {
+
+    //true returns read, false returns write
+
     if(opt.distType == "random")
     {
 
+    }
+    else if(opt.distType == "pure-r")
+    {
+        opt.distribution = []()
+        {
+            return false;
+        };
+    }
+    else if(opt.distType == "pure-w")
+    {
+        opt.distribution = []()
+        {
+            return true;
+        };
+    }
+    else if(opt.distType == "fast-9-1")
+    {
+        opt.distribution = [=]()
+        {
+            static thread_local uint32_t counter = 0;
+            counter += 1;
+            if(counter >= 9)
+            {
+                counter -= 10;
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        };
     }
     else if(opt.distType == "static")
     {
@@ -608,7 +632,7 @@ int main(int argc, char** argv)
     chooseDist(test);
     chooseSection(test);
     chooseGroupFunc(test);
-    runRwCorrectnessTestsForLock<MrwLockOpt>(5,{4,8,8,8,8,8,8,8,8,8,15},"MRW-OPT 7800x3d",true);
+    //runRwCorrectnessTestsForLock<MrwLockOpt>(5,{4,8,8,8,8,8,8,8,8,8,15},"MRW-OPT 7800x3d",true);
     //runRwCorrectnessTestsForLock<MrwLockOpt>(2,std::vector<int>(100,8),"MRW-OPT 7800x3d",true);
     //runRwCorrectnessTestsForLock<CrmrRwLock>(10,{4,8,15},"CRMR-WP 7800x3d",true);
     runTest(test);

@@ -4,6 +4,6 @@ build/LockTester \
     --time 1 \
     --csType "empty" \
     --lockType "mrw-opt" \
-    --distType "static" \
+    --distType "pure-r" \
     --ratio "10.0" \
     -v

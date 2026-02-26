@@ -20,7 +20,7 @@ MrwLockOpt::~MrwLockOpt()
 
     double avgReaders = static_cast<double>(totalReaders.load()) / totalReads.load();
 
-    printf("Average readers per read node %f times\n",avgReaders);
+    printf("Avg readers pernode %f\n",avgReaders);
     */
 }
 
@@ -40,8 +40,11 @@ void MrwLockOpt::writeUnlock()
 void MrwLockOpt::readLock()
 {
     bool makeOwnNode = false;
+    int attemptFails = 0;
+    mrwo_qnode* lastPointer = nullptr;
     do
     {
+        lastPointer = myTarget;
         myTarget = mTail.load();
 
         if(myTarget)
@@ -52,7 +55,11 @@ void MrwLockOpt::readLock()
 
             if(!readerCanJoin(unmaskedCount))
             {
-                makeOwnNode = true;
+                attemptFails++;
+                if(myTarget == lastPointer)
+                {
+                    attemptFails = 10;
+                }
                 continue;
             }
             while(true)
@@ -76,7 +83,8 @@ void MrwLockOpt::readLock()
                     else
                     {
                         // go make own node
-                        makeOwnNode = true;
+                        //makeOwnNode = true;
+                        attemptFails++;
                         //lockedOut.fetch_add(1);
                         break;
                     }
@@ -85,10 +93,11 @@ void MrwLockOpt::readLock()
         }
         else
         {
-            makeOwnNode = true;
+            //makeOwnNode = true;
+            attemptFails++;
         }
     }
-    while(!makeOwnNode);
+    while(attemptFails < FAIL_LIMIT);
 
     cur = 1 - cur;
     myTarget = &mine[cur];

@@ -46,8 +46,8 @@ public:
         else
         {
             node->count.fetch_and(~LAST_BIT_MASK);
-
-            /*if(node->count > 0)
+/*
+            if(node->count > 0)
             {
                 totalReaders.fetch_add(node->count.load());
                 totalReads.fetch_add(1);
@@ -89,5 +89,6 @@ private:
 
     static constexpr uint32_t LOCKED_READING_START_MASK = 0x80000001;
     static constexpr uint32_t LAST_BIT_MASK = 1 << 31; 
+    static constexpr uint32_t FAIL_LIMIT = 5; 
 };
 
