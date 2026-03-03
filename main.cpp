@@ -272,15 +272,17 @@ std::vector<int> getCompConfig(int maxT, int stride = 8,int threshold = 32)
 struct TestOptions
 {
     int time = -1;
+    int threads = -1;
     std::string name = "";
     std::string lockType = "";
     std::string distType = "";
     std::string csType = "";
     std::string groupFunc = "";
     float writeRatio = 10.0;
-    int stride = 8;
-    int strideThreshold = 32;
     bool verbose = false;
+    int x1 = -1;
+    int x2 = -1;
+    int x3 = -1;
     std::function<bool()> distribution;
     std::function<void()> w_section;
     std::function<void()> r_section;
@@ -299,101 +301,101 @@ void rwThrptTest
 {
     using namespace std::chrono_literals;
     int maxThreads = std::thread::hardware_concurrency();
-    auto config = getCompConfig(maxThreads,opt.stride,opt.strideThreshold);
 
     auto dist = opt.distribution;
     auto w_section = opt.w_section;
     auto r_section = opt.r_section;
+    int numThreads = opt.threads;
+    int x1 = opt.x1;
+    int x2 = opt.x2;
+    int x3 = opt.x3;
 
-    for(int numThreads : config)
+    RwLock lock;
+
+    bool startBarrier = false;
+
+    bool continueFlag = true;
+
+    auto thread = [&](Aligned64bUint& wItrs, Aligned64bUint& rItrs)
     {
+        while(!startBarrier);
 
-        RwLock lock;
-
-        bool startBarrier = false;
-
-        bool continueFlag = true;
-
-        auto thread = [&](Aligned64bUint& wItrs, Aligned64bUint& rItrs)
+        while(continueFlag)
         {
-            while(!startBarrier);
-
-            while(continueFlag)
+            if(dist())
             {
-                if(dist())
-                {
-                    //write
-                    lock.writeLock();
-                    w_section();
-                    lock.writeUnlock();
-                    wItrs.value++;
-                }
-                else
-                {
-                    // read
-                    lock.readLock();
-                    r_section();
-                    lock.readUnlock();
-                    rItrs.value++;
-                }
+                //write
+                lock.writeLock();
+                w_section();
+                lock.writeUnlock();
+                wItrs.value++;
             }
-        };
-
-        std::vector<std::thread> threads;
-        std::vector<Aligned64bUint> writeIterations = std::vector<Aligned64bUint>(numThreads,{0});
-        std::vector<Aligned64bUint> readIterations =  std::vector<Aligned64bUint>(numThreads,{0});
-
-        for(int i = 0; i < numThreads;i++)
-        {
-            threads.push_back(std::thread(
-                    thread,
-                    std::ref(writeIterations[i]),
-                    std::ref(readIterations[i])));
+            else
+            {
+                // read
+                lock.readLock();
+                r_section();
+                lock.readUnlock();
+                rItrs.value++;
+            }
         }
+    };
 
-        std::this_thread::sleep_for(50ms);
-        auto startTime = std::chrono::high_resolution_clock::now();
-        auto currentTime = std::chrono::high_resolution_clock::now();
+    std::vector<std::thread> threads;
+    std::vector<Aligned64bUint> writeIterations = std::vector<Aligned64bUint>(numThreads,{0});
+    std::vector<Aligned64bUint> readIterations =  std::vector<Aligned64bUint>(numThreads,{0});
 
-        startBarrier = true;
-
-        std::this_thread::sleep_for(std::chrono::seconds(opt.time));
-
-        continueFlag = false; 
-        for(int i = 0; i < numThreads; i++)
-        {
-            threads[i].join();
-        }
-
-        uint64_t totalWrites = 0; 
-        uint64_t totalReads = 0; 
-
-        for(auto intStruct : writeIterations)
-        {
-            totalWrites += intStruct.value;
-        }
-
-        for(auto intStruct : readIterations)
-        {
-            totalReads += intStruct.value;
-        }
-
-
-        double writeRate = totalWrites/static_cast<double>(opt.time);
-        double readRate = totalReads/static_cast<double>(opt.time);
-
-        double combinedRate = writeRate + readRate;
-
-        printf("%s,%s,%s,%f,%d,%.3e,%.3e,%.3e\n",
-                opt.name.c_str(),
-                opt.lockType.c_str(),
-                opt.csType.c_str(),
-                opt.writeRatio,
-                numThreads,
-                writeRate,
-                readRate,
-                combinedRate);
+    for(int i = 0; i < numThreads;i++)
+    {
+        threads.push_back(std::thread(
+                thread,
+                std::ref(writeIterations[i]),
+                std::ref(readIterations[i])));
     }
+
+    std::this_thread::sleep_for(50ms);
+    auto startTime = std::chrono::high_resolution_clock::now();
+    auto currentTime = std::chrono::high_resolution_clock::now();
+
+    startBarrier = true;
+
+    std::this_thread::sleep_for(std::chrono::seconds(opt.time));
+
+    continueFlag = false; 
+    for(int i = 0; i < numThreads; i++)
+    {
+        threads[i].join();
+    }
+
+    uint64_t totalWrites = 0; 
+    uint64_t totalReads = 0; 
+
+    for(auto intStruct : writeIterations)
+    {
+        totalWrites += intStruct.value;
+    }
+
+    for(auto intStruct : readIterations)
+    {
+        totalReads += intStruct.value;
+    }
+
+
+    double writeRate = totalWrites/static_cast<double>(opt.time);
+    double readRate = totalReads/static_cast<double>(opt.time);
+
+    double combinedRate = writeRate + readRate;
+
+    printf("%s,%s,%s,%f,%d,%d,%d,%d,%.3e,%.3e,%.3e\n",
+            opt.name.c_str(),
+            opt.lockType.c_str(),
+            opt.csType.c_str(),
+            opt.writeRatio,
+            numThreads,
+            x1,x2,x3,
+            writeRate,
+            readRate,
+            combinedRate);
 }
 
 
@@ -516,6 +518,8 @@ void runTest
 {
     if(opt.lockType == "mrw-opt")
     {
+        MrwLockOpt::setNodeSearchLimit(opt.x1);
+        MrwLockOpt::setCasAttemptLimit(opt.x2);
         rwThrptTest<MrwLockOpt>(opt);
     }
     else if(opt.lockType == "mrw")
@@ -569,16 +573,10 @@ int main(int argc, char** argv)
                 test.csType = s;
             },true);
 
-    parser.addOption("--stride",
+    parser.addOption("--threads",
             [&](const std::string& s)
             {
-                test.stride = Utils::strToInt(s);
-            },true);
-
-    parser.addOption("--threshold",
-            [&](const std::string& s)
-            {
-                test.strideThreshold = Utils::strToInt(s);
+                test.threads = Utils::strToInt(s);
             },true);
 
     parser.addOption("--ratio",
@@ -605,6 +603,24 @@ int main(int argc, char** argv)
                 test.verbose = true;
             },false);
 
+    parser.addOption("--x1",
+            [&](const std::string& s)
+            {
+                test.x1 = Utils::strToInt(s);
+            },true);
+
+    parser.addOption("--x2",
+            [&](const std::string& s)
+            {
+                test.x2 = Utils::strToInt(s);
+            },true);
+
+    parser.addOption("--x3",
+            [&](const std::string& s)
+            {
+                test.x3 = Utils::strToInt(s);
+            },true);
+
     parser.parse(argc,argv);
 
     if(test.name.empty())
@@ -625,6 +641,11 @@ int main(int argc, char** argv)
     else if(test.time <= 0)
     {
         printf("Test must have positive time\n");
+        std::exit(1);
+    }
+    else if(test.threads <= 0)
+    {
+        printf("Test must have positive number of threads!\n");
         std::exit(1);
     }
 

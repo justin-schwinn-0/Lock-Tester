@@ -7,6 +7,9 @@ static thread_local mrwo_qnode mine[2];
 static thread_local mrwo_qnode* myTarget;
 static thread_local int cur = 0;
 
+uint32_t MrwLockOpt::SEARCH_LIMIT = 5;
+uint32_t MrwLockOpt::CAS_LIMIT = 5;
+
 MrwLockOpt::MrwLockOpt():
     mTail(nullptr)
 {
@@ -53,16 +56,18 @@ void MrwLockOpt::readLock()
             uint32_t curCount = unmaskedCount & (~LAST_BIT_MASK);
             uint32_t newCount = unmaskedCount+ 1;
 
+            uint32_t casAttempts = 0;
+
             if(!readerCanJoin(unmaskedCount))
             {
                 attemptFails++;
                 if(myTarget == lastPointer)
                 {
-                    attemptFails = 10;
+                    attemptFails = 2 * SEARCH_LIMIT;
                 }
                 continue;
             }
-            while(true)
+            while(casAttempts < CAS_LIMIT)
             {
                 if(myTarget->count.compare_exchange_strong(unmaskedCount,newCount))
                 {
@@ -78,6 +83,7 @@ void MrwLockOpt::readLock()
                     if(readerCanJoin(unmaskedCount))
                     {
                         newCount = unmaskedCount + 1;
+                        casAttempts++;
                         //misses.fetch_add(1);
                     }
                     else
@@ -97,7 +103,7 @@ void MrwLockOpt::readLock()
             attemptFails++;
         }
     }
-    while(attemptFails < FAIL_LIMIT);
+    while(attemptFails < SEARCH_LIMIT);
 
     cur = 1 - cur;
     myTarget = &mine[cur];

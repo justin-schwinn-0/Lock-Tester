@@ -75,6 +75,16 @@ public:
         return count >= LOCKED_READING_START_MASK;
     }
 
+    static void setNodeSearchLimit(uint32_t val)
+    {
+        SEARCH_LIMIT = val;
+    }
+
+    static void setCasAttemptLimit(uint32_t val)
+    {
+        CAS_LIMIT = val;
+    }
+
     void print();
 
 private:
@@ -89,6 +99,7 @@ private:
 
     static constexpr uint32_t LOCKED_READING_START_MASK = 0x80000001;
     static constexpr uint32_t LAST_BIT_MASK = 1 << 31; 
-    static constexpr uint32_t FAIL_LIMIT = 5; 
+    static uint32_t SEARCH_LIMIT;
+    static uint32_t CAS_LIMIT;
 };
 
