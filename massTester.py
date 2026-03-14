@@ -1,15 +1,16 @@
 import os
 
-name = "7800x3d_configs"
-time = 3
-threads = [4,8,12,16]
+name = "2x epyc milan test"
+time = 10
+threads = [8,16,32,40,48,56,64,72,80,88,96,104,112,128]
+locks["mrw-opt","crmr-w"]
 
-searchLimits = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]
-casLimits = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]
+searchLimits = [5]
+casLimits = [5]
 
-def createCmd(name,time,t,s,c):
+def createCmd(name,time,l,t,s,c):
     cmd = f"./build/LockTester --name {name} --time {time} --threads {t} --x1 {s} --x2 {c} "
-    cmd += "--csType \"empty\" --lockType \"mrw-opt\" --distType \"fast-9-1\""
+    cmd += f"--csType \"empty\" --lockType \"{l}\" --distType \"fast-9-1\""
 
     return cmd
 
@@ -17,7 +18,7 @@ def createCmd(name,time,t,s,c):
 #print(f"Test will take {lengthOfTests}s")
 
 for t in threads:
-    for s in searchLimits:
-        for c in casLimits:
-            cmd = createCmd(name,time,t,s,c)
-            os.system(cmd);
+    for l in locks
+        cmd = createCmd(name,time,l,t,5,5)
+        os.system(cmd);
+

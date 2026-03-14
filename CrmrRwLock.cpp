@@ -32,7 +32,7 @@ void CrmrRwLock::writeLock()
     {
         while(!mPermit[prevD].load())
         {
-            std::this_thread::yield();
+            //std::this_thread::yield();
         }
     }
 
@@ -46,7 +46,7 @@ void CrmrRwLock::writeLock()
     {
         while(!mExitPermit.load())
         {
-            std::this_thread::yield();
+            //std::this_thread::yield();
         }
     }
 
@@ -82,7 +82,7 @@ void CrmrRwLock::readLock()
 
     while(!mGate[d].load())
     {
-        std::this_thread::yield();
+        //std::this_thread::yield();
     }
 
     local_d = d;

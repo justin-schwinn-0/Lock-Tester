@@ -368,7 +368,7 @@ void rwThrptTest
     }
 
     uint64_t totalWrites = 0; 
-    uint64_t totalReads = 0; 
+ uint64_t totalReads = 0; 
 
     for(auto intStruct : writeIterations)
     {
@@ -494,6 +494,7 @@ void chooseDist
 
 void chooseGroupFunc
 (
+ 
     TestOptions& opt
 )
 {
@@ -518,6 +519,18 @@ void runTest
 {
     if(opt.lockType == "mrw-opt")
     {
+        int s = opt.x1;
+        int c = opt.x2;
+        int defVal = (std::thread::hardware_concurrency() / 4) +1;
+
+        if(s == -1)
+        {
+            s = defVal;
+        }
+        if(c == -1)
+        {
+            c = defVal;
+        }
         MrwLockOpt::setNodeSearchLimit(opt.x1);
         MrwLockOpt::setCasAttemptLimit(opt.x2);
         rwThrptTest<MrwLockOpt>(opt);
@@ -653,7 +666,7 @@ int main(int argc, char** argv)
     chooseDist(test);
     chooseSection(test);
     chooseGroupFunc(test);
-    //runRwCorrectnessTestsForLock<MrwLockOpt>(5,{4,8,8,8,8,8,8,8,8,8,15},"MRW-OPT 7800x3d",true);
+    runRwCorrectnessTestsForLock<MrwLockOpt>(5,{4,8,8,8,8,8,8,8,8,8,15},"MRW-OPT 7800x3d",true);
     //runRwCorrectnessTestsForLock<MrwLockOpt>(2,std::vector<int>(100,8),"MRW-OPT 7800x3d",true);
     //runRwCorrectnessTestsForLock<CrmrRwLock>(10,{4,8,15},"CRMR-WP 7800x3d",true);
     runTest(test);

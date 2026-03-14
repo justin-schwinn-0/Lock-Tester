@@ -28,12 +28,12 @@ public:
     void writeUnlock();
 
 private:
-    std::atomic<int> mD;
-    std::atomic<bool> mExitPermit;
-    std::atomic<bool> mPermit[2];
-    std::atomic<bool> mGate[2];
-    Counter mCount[2];
-    Counter mExitCount;
+    alignas(64) std::atomic<int> mD;
+    alignas(64) std::atomic<bool> mExitPermit;
+    alignas(64) std::atomic<bool> mPermit[2];
+    alignas(64) std::atomic<bool> mGate[2];
+    alignas(64) Counter mCount[2];
+    alignas(64) Counter mExitCount;
 
     McsLock mLock;
 

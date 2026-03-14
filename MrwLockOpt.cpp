@@ -31,7 +31,6 @@ void MrwLockOpt::writeLock()
 {
     myTarget = nullptr;
     cur = 1 - cur;
-    //resetNode(&mine[cur]);
     performAquire(&mine[cur],0);
 }
 
@@ -43,55 +42,56 @@ void MrwLockOpt::writeUnlock()
 void MrwLockOpt::readLock()
 {
     bool makeOwnNode = false;
-    int attemptFails = 0;
+    int searchAttempts = 0;
     mrwo_qnode* lastPointer = nullptr;
-    do
+
+    while(searchAttempts < SEARCH_LIMIT)
     {
+        // outer loop reads mTail, searching for a node to join
+        searchAttempts++;
         lastPointer = myTarget;
         myTarget = mTail.load();
 
         if(myTarget)
         {
             uint32_t unmaskedCount = myTarget->count.load();
-            uint32_t curCount = unmaskedCount & (~LAST_BIT_MASK);
             uint32_t newCount = unmaskedCount+ 1;
-
-            uint32_t casAttempts = 0;
 
             if(!readerCanJoin(unmaskedCount))
             {
-                attemptFails++;
                 if(myTarget == lastPointer)
                 {
-                    attemptFails = 2 * SEARCH_LIMIT;
+                    break;
                 }
                 continue;
             }
+
+            uint32_t casAttempts = 0;
             while(casAttempts < CAS_LIMIT)
             {
+                // inner loop attempts to join a node if one is found
+                casAttempts++;
                 if(myTarget->count.compare_exchange_strong(unmaskedCount,newCount))
                 {
-                    //successes.fetch_add(1);
-                    // cas successful, spin on target
+                    // joined successfully, spin on target
                     while(spin(myTarget)) {}
                     return;
                 }
                 else
                 {
-                    // cas failed
-                    // count inc or is no longer locked
+                    // failed to join
+                    // check if we can join on new value 
                     if(readerCanJoin(unmaskedCount))
                     {
+                        // we can still try and join,
+                        // set up newCount for next attempt
                         newCount = unmaskedCount + 1;
-                        casAttempts++;
-                        //misses.fetch_add(1);
                     }
                     else
                     {
-                        // go make own node
-                        //makeOwnNode = true;
-                        attemptFails++;
-                        //lockedOut.fetch_add(1);
+                        // Abandon attempting to join this node,
+                        // we can not join it anymore
+                        searchAttempts++;
                         break;
                     }
                 }
@@ -99,11 +99,12 @@ void MrwLockOpt::readLock()
         }
         else
         {
-            //makeOwnNode = true;
-            attemptFails++;
+            if(lastPointer == nullptr)
+            {
+                break;
+            }
         }
     }
-    while(attemptFails < SEARCH_LIMIT);
 
     cur = 1 - cur;
     myTarget = &mine[cur];
@@ -127,7 +128,6 @@ void MrwLockOpt::performAquire(mrwo_qnode* node,uint32_t count)
 
     if(pred)
     {
-        setLocked(node,true);
         pred->next.store(node);
 
         while(spin(node)){}
@@ -152,14 +152,10 @@ void MrwLockOpt::performRelease(mrwo_qnode* node)
         while(!next) 
         {
             next = node->next.load();
-            //std::this_thread::yield();
         }
     }
 
-    if(next)
-    {
-        setLocked(next,false);
-    }
+    setLocked(next,false);
 }
 void MrwLockOpt::print()
 {

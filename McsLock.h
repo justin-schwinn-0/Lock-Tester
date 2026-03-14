@@ -7,8 +7,8 @@
 
 struct mcs_qnode
 {
-    bool locked;
-    std::atomic<mcs_qnode*> next;
+    alignas(64) bool locked;
+    alignas(64) std::atomic<mcs_qnode*> next;
 };
 
 class McsLock 
