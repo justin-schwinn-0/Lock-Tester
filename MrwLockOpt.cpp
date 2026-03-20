@@ -45,29 +45,28 @@ void MrwLockOpt::readLock()
     mrwo_qnode* lastPointer = nullptr;
     while(searchAttempts < SEARCH_LIMIT)
     {
-        // outer loop reads mTail, searching for a node to join
         searchAttempts++;
+        // track previous target
         lastPointer = myTarget;
+        // outer loop reads mTail, searching for a node to join
         myTarget = mTail.load();
-
+        if(myTarget == lastPointer)
+        { //if myTarget is the same as the last pointer 
+          //just enqueue your own node
+            break;
+        }
         if(myTarget)
         {
             uint32_t unmaskedCount = myTarget->count.load();
             uint32_t newCount = unmaskedCount+ 1;
-
             if(!readerCanJoin(unmaskedCount))
             {
-                if(myTarget == lastPointer)
-                {
-                    break;
-                }
                 continue;
             }
-
             uint32_t casAttempts = 0;
             while(casAttempts < CAS_LIMIT)
             {
-                // inner loop attempts to join a node if one is found
+                // inner loop attempts to join the node 
                 casAttempts++;
                 if(myTarget->count.compare_exchange_strong(unmaskedCount,newCount))
                 {
@@ -85,11 +84,9 @@ void MrwLockOpt::readLock()
                         // set up newCount for next attempt
                         newCount = unmaskedCount + 1;
                     }
-                    else
+                    else // readerCanJoin returned false
                     {
                         // Abandon attempting to join this node,
-                        // we can not join it anymore
-                        searchAttempts++;
                         break;
                     }
                 }
@@ -97,16 +94,11 @@ void MrwLockOpt::readLock()
         }
         else
         {
-            if(lastPointer == nullptr)
-            {
-                break;
-            }
+            break;
         }
     }
-
     cur = 1 - cur;
     myTarget = &mine[cur];
-
     performAquire(&mine[cur],1);
 }
 
