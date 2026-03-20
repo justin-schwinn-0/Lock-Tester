@@ -41,10 +41,8 @@ void MrwLockOpt::writeUnlock()
 
 void MrwLockOpt::readLock()
 {
-    bool makeOwnNode = false;
     int searchAttempts = 0;
     mrwo_qnode* lastPointer = nullptr;
-
     while(searchAttempts < SEARCH_LIMIT)
     {
         // outer loop reads mTail, searching for a node to join

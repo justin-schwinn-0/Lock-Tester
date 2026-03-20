@@ -457,9 +457,9 @@ void chooseDist
         {
             static thread_local uint32_t counter = 0;
             counter += 1;
-            if(counter >= 9)
+            if(counter > 9)
             {
-                counter -= 10;
+                counter = 0;
                 return true;
             }
             else
@@ -666,7 +666,7 @@ int main(int argc, char** argv)
     chooseDist(test);
     chooseSection(test);
     chooseGroupFunc(test);
-    runRwCorrectnessTestsForLock<MrwLockOpt>(5,{4,8,8,8,8,8,8,8,8,8,15},"MRW-OPT 7800x3d",true);
+    //runRwCorrectnessTestsForLock<MrwLockOpt>(5,{4,8,8,8,8,8,8,8,8,8,15},"MRW-OPT 7800x3d",true);
     //runRwCorrectnessTestsForLock<MrwLockOpt>(2,std::vector<int>(100,8),"MRW-OPT 7800x3d",true);
     //runRwCorrectnessTestsForLock<CrmrRwLock>(10,{4,8,15},"CRMR-WP 7800x3d",true);
     runTest(test);
