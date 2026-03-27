@@ -15,6 +15,7 @@ class McsLock
 {
 public:
     explicit McsLock(int size);
+    explicit McsLock();
     ~McsLock();
 
     McsLock(const McsLock&) = delete;
@@ -24,6 +25,10 @@ public:
     
     void aquire(uint32_t me);
     void release(uint32_t me);
+
+    void lock();
+
+    void unlock();
 private:
     std::atomic<mcs_qnode*> mTail;
 };

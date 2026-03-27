@@ -1,22 +1,21 @@
-#include "MrwLockOpt.h"
+#include "MrwLockCO.h"
 
 #include <thread>
 #include <cstdio>
 
-// changes are now frozen!
 
-static thread_local mrwo_qnode mine[2];
-static thread_local mrwo_qnode* myTarget;
+static thread_local mrwco_qnode mine[2];
+static thread_local mrwco_qnode* myTarget;
 static thread_local int cur = 0;
 
-uint32_t MrwLockOpt::SEARCH_LIMIT = 5;
-uint32_t MrwLockOpt::CAS_LIMIT = 5;
+uint32_t MrwLockCO::SEARCH_LIMIT = 5;
+uint32_t MrwLockCO::CAS_LIMIT = 5;
 
-MrwLockOpt::MrwLockOpt():
+MrwLockCO::MrwLockCO():
     mTail(nullptr)
 {
 }
-MrwLockOpt::~MrwLockOpt()
+MrwLockCO::~MrwLockCO()
 {
     /*
     printf("Lock successes %lu times\n",successes.load());
@@ -29,22 +28,22 @@ MrwLockOpt::~MrwLockOpt()
     */
 }
 
-void MrwLockOpt::writeLock()
+void MrwLockCO::writeLock()
 {
     myTarget = nullptr;
     cur = 1 - cur;
     performAquire(&mine[cur],0);
 }
 
-void MrwLockOpt::writeUnlock()
+void MrwLockCO::writeUnlock()
 {
     performRelease(&mine[cur]);
 }
 
-void MrwLockOpt::readLock()
+void MrwLockCO::readLock()
 {
     int searchAttempts = 0;
-    mrwo_qnode* lastPointer = nullptr;
+    mrwco_qnode* lastPointer = nullptr;
     while(searchAttempts < SEARCH_LIMIT)
     {
         searchAttempts++;
@@ -72,6 +71,7 @@ void MrwLockOpt::readLock()
                 casAttempts++;
                 if(myTarget->count.compare_exchange_strong(unmaskedCount,newCount))
                 {
+                    mCohortRelease();
                     // joined successfully, spin on target
                     while(spin(myTarget)) {}
                     return;
@@ -104,7 +104,7 @@ void MrwLockOpt::readLock()
     performAquire(&mine[cur],1);
 }
 
-void MrwLockOpt::readUnlock()
+void MrwLockCO::readUnlock()
 {
     uint32_t curCount = myTarget->count.fetch_sub(1);
     if(curCount == 1)
@@ -113,10 +113,11 @@ void MrwLockOpt::readUnlock()
     }
 }
 
-void MrwLockOpt::performAquire(mrwo_qnode* node,uint32_t count)
+void MrwLockCO::performAquire(mrwco_qnode* node,uint32_t count)
 {
     resetNode(node,count);
-    mrwo_qnode* pred = mTail.exchange(node);
+    mrwco_qnode* pred = mTail.exchange(node);
+    mCohortRelease();
 
     if(pred)
     {
@@ -130,13 +131,13 @@ void MrwLockOpt::performAquire(mrwo_qnode* node,uint32_t count)
     }
 }
 
-void MrwLockOpt::performRelease(mrwo_qnode* node)
+void MrwLockCO::performRelease(mrwco_qnode* node)
 {
-    mrwo_qnode* next = node->next.load();
+    mrwco_qnode* next = node->next.load();
     if(next == nullptr)
     {
-        mrwo_qnode* tmp = node;
-        if(mTail.compare_exchange_strong(tmp,static_cast<mrwo_qnode*>(nullptr)))
+        mrwco_qnode* tmp = node;
+        if(mTail.compare_exchange_strong(tmp,static_cast<mrwco_qnode*>(nullptr)))
         {
             return;
         }
@@ -149,9 +150,9 @@ void MrwLockOpt::performRelease(mrwo_qnode* node)
 
     setLocked(next,false);
 }
-void MrwLockOpt::print()
+void MrwLockCO::print()
 {
-    mrwo_qnode* node = &mine[cur];
+    mrwco_qnode* node = &mine[cur];
     while(node)
     {
         printf("{%x}->",node->count.load());

@@ -27,11 +27,14 @@
 //rw locks
 #include "BaseRwLock.h"
 #include "CrmrRwLock.h"
+#include "CrmrRwLockCo.h"
 #include "MrwLock.h"
 #include "MrwLockOpt.h"
 #include "CrmrRwLockR.h"
-#include "MrwNaOpt.h"
-#include "MrwLockSc.h"
+#include "MrwLockCO.h"
+
+#include "GroupRwCohort.h"
+#include "CohortFunctions.h"
 
 #include "OptionParser.h"
 
@@ -283,6 +286,9 @@ struct TestOptions
     int x1 = -1;
     int x2 = -1;
     int x3 = -1;
+    int t1 = -1;
+    int t2 = -1;
+    int t3 = -1;
     std::function<bool()> distribution;
     std::function<void()> w_section;
     std::function<void()> r_section;
@@ -368,7 +374,7 @@ void rwThrptTest
     }
 
     uint64_t totalWrites = 0; 
- uint64_t totalReads = 0; 
+    uint64_t totalReads = 0; 
 
     for(auto intStruct : writeIterations)
     {
@@ -386,18 +392,21 @@ void rwThrptTest
 
     double combinedRate = writeRate + readRate;
 
-    printf("%s,%s,%s,%f,%d,%d,%d,%d,%.3e,%.3e,%.3e\n",
+    printf("%s,%s,%s,%f,%d,%d,%d,%d,%d,%d,%d,%.3e,%.3e,%.3e\n",
             opt.name.c_str(),
             opt.lockType.c_str(),
             opt.csType.c_str(),
             opt.writeRatio,
             numThreads,
             x1,x2,x3,
+            opt.t1,opt.t2,opt.t3,
             writeRate,
             readRate,
             combinedRate);
 }
 
+// about 1G
+std::vector<uint8_t> bigVec1G = std::vector<uint8_t>(1 << 30,9);
 
 void chooseSection
 (
@@ -417,6 +426,45 @@ void chooseSection
             int cpuId =sched_getcpu();
             printf("Running on CPU: %d\n",cpuId);
         };
+    }
+    else if(opt.csType == "n-mem-access")
+    {
+        //thread will access n random bytes of memory,
+        // from a huge vector.
+        // the size of the vector makes it unlikley that the
+        // value is stored in a cache,
+        int rtrials = opt.t1; 
+        int wtrials = opt.t2; 
+        opt.r_section = [=]()
+        {
+            static thread_local int total = 0;
+            
+            static thread_local unsigned int seed = std::chrono::system_clock::now().time_since_epoch().count();
+            static thread_local std::mt19937 gen(seed);
+            static thread_local std::uniform_int_distribution<> dist(0,bigVec1G.size());
+
+            for(int i = 0; i < rtrials; i++)
+            {
+                int z = dist(gen);
+                total += bigVec1G[z];
+            }
+        };
+        opt.w_section = [=]()
+        {
+            static thread_local int total = 0;
+            
+            static thread_local unsigned int seed = std::chrono::system_clock::now().time_since_epoch().count();
+            static thread_local std::mt19937 gen(seed);
+            static thread_local std::uniform_int_distribution<> dist(0,bigVec1G.size());
+
+            for(int i = 0; i < wtrials; i++)
+            {
+                int z = dist(gen);
+                total += bigVec1G[z];
+                bigVec1G[z] = total;
+            }
+        };
+
     }
     else
     {
@@ -499,45 +547,70 @@ void chooseGroupFunc
 )
 {
     std::function<uint32_t()> grpFunc;
-    if(opt.groupFunc == "smt_grp1")
-    {
-        grpFunc = []()
-        {
-            int cpuSize = std::thread::hardware_concurrency();
-            int cpuId = sched_getcpu();
-
-            return cpuId % (cpuSize/2);
-        };
-    }
-    MrwNaOptLock::setGroupFunction(grpFunc);
 }
+
+using MrwCo2 = GroupRwCohort<FetchAndIncLock,
+                    MrwLockCO,
+                    NumaN_NHT<2>,
+                    2>;
+
+using MrwCo8 = GroupRwCohort<FetchAndIncLock,
+                    MrwLockCO,
+                    NumaN_NHT<8>,
+                    8>;
+
+using MrwCo16 = GroupRwCohort<FetchAndIncLock,
+                    MrwLockCO,
+                    NumaN_NHT<16>,
+                    16>;
+
+using CrmrwCo2 = GroupRwCohort<FetchAndIncLock,
+                    CrmrRwLockCo,
+                    NumaN_NHT<2>,
+                    2>;
+
+using CrmrwCo8 = GroupRwCohort<FetchAndIncLock,
+                    CrmrRwLockCo,
+                    NumaN_NHT<8>,
+                    8>;
+
+using CrmrwCo16 = GroupRwCohort<FetchAndIncLock,
+                    CrmrRwLockCo,
+                    NumaN_NHT<16>,
+                    16>;
+
+using MrwCo8_HT = GroupRwCohort<FetchAndIncLock,
+                    MrwLockCO,
+                    NumaN_NHT<8>,
+                    8>;
 
 void runTest
 (
     const TestOptions& opt
 )
 {
+    int s = opt.x1;
+    int c = opt.x2;
+    int defVal = (std::thread::hardware_concurrency() / 4) +1;
+
+    if(s == -1)
+    {
+        s = defVal;
+    }
+    if(c == -1)
+    {
+        c = defVal;
+    }
+
+    MrwLockOpt::setNodeSearchLimit(s);
+    MrwLockOpt::setCasAttemptLimit(c);
+
+    MrwLockCO::setNodeSearchLimit(s);
+    MrwLockCO::setCasAttemptLimit(c);
+
     if(opt.lockType == "mrw-opt")
     {
-        int s = opt.x1;
-        int c = opt.x2;
-        int defVal = (std::thread::hardware_concurrency() / 4) +1;
-
-        if(s == -1)
-        {
-            s = defVal;
-        }
-        if(c == -1)
-        {
-            c = defVal;
-        }
-        MrwLockOpt::setNodeSearchLimit(opt.x1);
-        MrwLockOpt::setCasAttemptLimit(opt.x2);
         rwThrptTest<MrwLockOpt>(opt);
-    }
-    else if(opt.lockType == "mrw")
-    {
-        rwThrptTest<MrwLock>(opt);
     }
     else if(opt.lockType == "crmr-w")
     {
@@ -546,6 +619,30 @@ void runTest
     else if(opt.lockType == "crmr-r")
     {
         rwThrptTest<CrmrRwLockR>(opt);
+    }
+    else if(opt.lockType == "mrw-co-2")
+    {
+        rwThrptTest<MrwCo2>(opt);
+    }
+    else if(opt.lockType == "mrw-co-8")
+    {
+        rwThrptTest<MrwCo8>(opt);
+    }
+    else if(opt.lockType == "mrw-co-16")
+    {
+        rwThrptTest<MrwCo16>(opt);
+    }
+    else if(opt.lockType == "crmr-w-co-2")
+    {
+        rwThrptTest<CrmrwCo2>(opt);
+    }
+    else if(opt.lockType == "crmr-w-co-8")
+    {
+        rwThrptTest<CrmrwCo8>(opt);
+    }
+    else if(opt.lockType == "crmr-w-co-16")
+    {
+        rwThrptTest<CrmrwCo16>(opt);
     }
     else if(opt.lockType == "cpp-std")
     {
@@ -557,10 +654,15 @@ void runTest
     }
 }
 
+void blank()
+{}
+
 int main(int argc, char** argv)
 {   
     OptionParser parser;
     TestOptions test;
+
+    PrintCohortFunction<NumaN_NHT<2>>();
 
     parser.addOption("--time",
             [&](const std::string& s)
@@ -634,6 +736,24 @@ int main(int argc, char** argv)
                 test.x3 = Utils::strToInt(s);
             },true);
 
+    parser.addOption("--t1",
+            [&](const std::string& s)
+            {
+                test.t1 = Utils::strToInt(s);
+            },true);
+
+    parser.addOption("--t2",
+            [&](const std::string& s)
+            {
+                test.t2 = Utils::strToInt(s);
+            },true);
+
+    parser.addOption("--t3",
+            [&](const std::string& s)
+            {
+                test.t3 = Utils::strToInt(s);
+            },true);
+
     parser.parse(argc,argv);
 
     if(test.name.empty())
@@ -666,7 +786,12 @@ int main(int argc, char** argv)
     chooseDist(test);
     chooseSection(test);
     chooseGroupFunc(test);
-    //runRwCorrectnessTestsForLock<MrwLockOpt>(5,{4,8,8,8,8,8,8,8,8,8,15},"MRW-OPT 7800x3d",true);
+
+    runRwCorrectnessTestsForLock<MrwCo2>(1,{4,8,15},"MrwCo2 7800x3d",true);
+    runRwCorrectnessTestsForLock<CrmrwCo2>(1,{4,8,15},"CrmrRwLockCo2 7800x3d",true);
+    runRwCorrectnessTestsForLock<CrmrwCo8>(1,{4,8,15},"CrmrRwLockCo8 7800x3d",true);
+    runRwCorrectnessTestsForLock<CrmrwCo16>(1,{4,8,15},"CrmrRwLockCo16 7800x3d",true);
+    //runRwCorrectnessTestsForLock<MrwLockOpt>(2,{4,8,8,8,8,8,8,8,8,8,15},"MrwLockOpt 7800x3d",true);
     //runRwCorrectnessTestsForLock<MrwLockOpt>(2,std::vector<int>(100,8),"MRW-OPT 7800x3d",true);
     //runRwCorrectnessTestsForLock<CrmrRwLock>(10,{4,8,15},"CRMR-WP 7800x3d",true);
     runTest(test);

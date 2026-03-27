@@ -9,12 +9,27 @@ McsLock::McsLock(int size) :
 {
 }
 
+McsLock::McsLock() :
+    mTail(nullptr)
+{
+}
+
 McsLock::~McsLock()
 {
 }
 
 void McsLock::aquire(uint32_t me)
 { 
+    lock();
+}
+
+void McsLock::release(uint32_t me)
+{
+    unlock();
+}
+
+void McsLock::lock()
+{
     mcs_qnode* pred = mTail.exchange(&mine);
 
     if(pred)
@@ -29,7 +44,7 @@ void McsLock::aquire(uint32_t me)
     }
 }
 
-void McsLock::release(uint32_t me)
+void McsLock::unlock()
 {
     if(mine.next == nullptr)
     {

@@ -24,10 +24,11 @@ set(Sources
     McsLock.cpp
     CnaLock.cpp
     CrmrRwLock.cpp
+    CrmrRwLockCo.cpp
     CrmrRwLockR.cpp
     MrwLock.cpp
     MrwLockOpt.cpp
-    MrwNaOpt.cpp
+    MrwLockCO.cpp
     OptionParser.cpp
 )
 
@@ -47,11 +48,13 @@ set(Headers
     CnaLock.h
     BaseRwLock.h
     CrmrRwLock.h
+    CrmrRwLockCo.h
     CrmrRwLockR.h
     MrwLock.h
     MrwLockOpt.h
-    MrwNaOpt.h
+    MrwLockCO.h
     OptionParser.h
+    GroupRwCohort.h
 )
 
 add_executable(${PROJECT_NAME} ${Sources} ${Headers})
