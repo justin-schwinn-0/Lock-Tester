@@ -32,12 +32,7 @@ public:
     void performAquire(mrwo_qnode* node,uint32_t count);
     void performRelease(mrwo_qnode* node);
 
-    inline bool isLocked(uint32_t counter)
-    {
-        return (counter & 0x80000000) > 0; 
-    }
-
-    inline void setLocked(mrwo_qnode* node, bool set)
+    void setLocked(mrwo_qnode* node, bool set)
     {
         if(set)
         {
@@ -57,22 +52,59 @@ public:
         node->locked.store(set);
     }
 
-    inline void resetNode(mrwo_qnode* node,uint32_t count = 0)
+    void resetNode(mrwo_qnode* node,uint32_t count = 0)
     {
         node->count.store((count | LAST_BIT_MASK));
         node->next.store(nullptr);
         node->locked.store(true);
     }
 
-    inline bool spin(mrwo_qnode* node)
+    bool spin(mrwo_qnode* node)
     {
         return node->locked;
         //return isLocked(node->count.load());
     }
 
-    inline bool readerCanJoin(uint32_t count)
+    bool readerCanJoin(uint32_t count)
     {
-        return count >= LOCKED_READING_START_MASK;
+        // return value of lower 31 bits
+        return (count & ~LAST_BIT_MASK) > 0;
+    }
+
+
+    bool tryJoinNode(mrwo_qnode* node, uint32_t expec)
+    {
+
+        int casAttempts = 0;
+        while(casAttempts < CAS_LIMIT)
+        {
+            casAttempts++;
+            if(node->count.compare_exchange_strong(expec,expec+1))
+            {
+                // joined successfully, spin on target
+                while(spin(node)) {}
+                return true;
+            }
+            else
+            {
+                // failed to join
+                // check if we can join on new value 
+                if(readerCanJoin(expec))
+                {
+                    // we can still try and join,
+                    // set up newCount for next attempt
+                    expec = expec + 1;
+                }
+                else 
+                {
+                    // readerCanJoin returned false
+                    // Abandon attempting to join this node,
+                    return false;
+                }
+            }
+        }
+        // attempts to join exhausted, move on to next node
+        return false;
     }
 
     static void setNodeSearchLimit(uint32_t val)
@@ -95,6 +127,8 @@ private:
     std::atomic<uint64_t> lockedOut;
     std::atomic<uint64_t> totalReaders;
     std::atomic<uint64_t> totalReads;
+
+    std::atomic<uint64_t> totalNodes;
 
 
     static constexpr uint32_t LOCKED_READING_START_MASK = 0x80000001;

@@ -14,7 +14,7 @@ class csSpot:
         self.t3 = t3
 
     def getStr(self):
-        return f"--csType {self.name} --t1 {self.t1} --t2 {self.t2} --t3 {self.t3}"
+        return f"--csType \"{self.name}\" --t1 {self.t1} --t2 {self.t2} --t3 {self.t3}"
 
 class TestGroup:
     tests = []
@@ -29,9 +29,14 @@ class TestGroup:
         self.totalTime += time
 
     def print(self):
-        print(f"{self.totalTime}s across {len(self.tests)} tests")
-        for t in self.tests:
-            print(f"{t}")
+        print(f"{self.totalTime}s ({self.totalTime/60} min) across {len(self.tests)} tests")
+
+    def writeTests(self, oFilePath):
+        with open(oFilePath,"w") as f:
+            f.write("#!/bin/bash")
+            for t in self.tests:
+                f.write("\n")
+                f.write(t)
             
         
 p = argparse.ArgumentParser(description="Runs an argument space of tests.")
@@ -40,15 +45,19 @@ p.add_argument("--threads", type=int,default=1,help="Max number of threads to ru
 p.add_argument("--trials", type=int,default=1,help="trials per test")
 p.add_argument("--seconds", type=int,default=1,help="seconds per test")
 p.add_argument("--numNodes", type=int,default=1,help="number of nodes to split across")
+p.add_argument("--nodeName", type=str,default=1,help="name of node")
+p.add_argument("--outDir", type=str,default=1,help="Output Directory")
 
 args = p.parse_args();
 
 threadSpace = [1]
 
-for i in range(8,args.threads+1,8):
+for i in range(2,args.threads+1,2):
     threadSpace.append(i)
 
-lockSpace = ["mrw-opt","c-rmr-w","cppstd","mrw-co-2"]
+ratioSpace = ["2.0","5.0","10.0","20.0"]
+
+lockSpace = ["mrw-opt","crmr-w","cpp-std"]
 
 csSpace = [csSpot("n-mem-1G",1,1),
            csSpot("n-mem-1G",5,5),
@@ -64,25 +73,26 @@ for i in range(0,args.numNodes):
 
 i = 0
 
+name = args.nodeName
+sec = args.seconds
+trials = args.trials
+
 for l in lockSpace:
     for c in csSpace:
         for t in threadSpace:
-            count += args.trials
-            testStr = f"{l} {c.getStr()} {t}"
-            groups[i].addTest(testStr,args.seconds*args.trials)
-            i = (i+1) % (len(groups))
+            for r in ratioSpace:
+                count += args.trials
+                testStr = f"{args.nodeName} {l} {c.getStr()} {t}"
 
-totalSeconds = count * args.seconds
+                testStr = f"./build/LockTester --name {name} --time {sec} --threads {t} --lockType \"{l}\" --distType \"static\" --ratio {r} {c.getStr()} --trials {trials}"
+                groups[i].addTest(testStr,args.seconds*args.trials)
+                i = (i+1) % (len(groups))
 
-secondsPerNode = totalSeconds / 900
-
-print(len(lockSpace))
-print(len(csSpace))
-print(len(threadSpace))
-print(f"total time: {totalSeconds}")
-print(f"seconds per node: {secondsPerNode}")
 
 print(f"{len(groups)} groups")
 
+i = 0
 for g in groups:
-    g.print()
+    g.print();
+    g.writeTests(f"{args.outDir}/{args.nodeName}-test-{i}.sh")
+    i+=1

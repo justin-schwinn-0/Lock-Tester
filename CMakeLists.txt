@@ -8,6 +8,7 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread -g -O1")
 
 find_package(Threads REQUIRED)
+find_library(CK_LIB ck REQUIRED )
 find_library(NUMA_LIB numa)
 
 set(Sources
@@ -29,6 +30,7 @@ set(Sources
     MrwLock.cpp
     MrwLockOpt.cpp
     MrwLockCO.cpp
+    ManagedMrwCo.cpp
     OptionParser.cpp
 )
 
@@ -53,10 +55,16 @@ set(Headers
     MrwLock.h
     MrwLockOpt.h
     MrwLockCO.h
+    ManagedMrwCo.h
     OptionParser.h
     GroupRwCohort.h
+    CkLocks.h
 )
 
 add_executable(${PROJECT_NAME} ${Sources} ${Headers})
+
+target_compile_options(${PROJECT_NAME} PRIVATE -O3 -march=native)
+
 target_link_libraries(${PROJECT_NAME} PRIVATE Threads::Threads)
 target_link_libraries(${PROJECT_NAME} PRIVATE numa)
+target_link_libraries(${PROJECT_NAME} PRIVATE ck)

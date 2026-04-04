@@ -4,6 +4,7 @@
 #include <cstdio>
 
 // changes are now frozen!
+// nvm added concurrent entering!
 
 static thread_local mrwo_qnode mine[2];
 static thread_local mrwo_qnode* myTarget;
@@ -27,6 +28,8 @@ MrwLockOpt::~MrwLockOpt()
 
     printf("Avg readers pernode %f\n",avgReaders);
     */
+
+    //printf("total nodes %lu\n",totalNodes.load());
 }
 
 void MrwLockOpt::writeLock()
@@ -53,45 +56,26 @@ void MrwLockOpt::readLock()
         // outer loop reads mTail, searching for a node to join
         myTarget = mTail.load();
         if(myTarget == lastPointer)
-        { //if myTarget is the same as the last pointer 
-          //just enqueue your own node
+        { 
+            //if myTarget is the same as the last pointer 
+            //just enqueue your own node
             break;
         }
         if(myTarget)
         {
-            uint32_t unmaskedCount = myTarget->count.load();
-            uint32_t newCount = unmaskedCount+ 1;
-            if(!readerCanJoin(unmaskedCount))
+            uint32_t count = myTarget->count.load();
+            if(!readerCanJoin(count))
             {
+                // can't join this node,
+                // move on to next one
                 continue;
             }
-            uint32_t casAttempts = 0;
-            while(casAttempts < CAS_LIMIT)
+            
+            bool joined = tryJoinNode(myTarget,count);
+
+            if(joined)
             {
-                // inner loop attempts to join the node 
-                casAttempts++;
-                if(myTarget->count.compare_exchange_strong(unmaskedCount,newCount))
-                {
-                    // joined successfully, spin on target
-                    while(spin(myTarget)) {}
-                    return;
-                }
-                else
-                {
-                    // failed to join
-                    // check if we can join on new value 
-                    if(readerCanJoin(unmaskedCount))
-                    {
-                        // we can still try and join,
-                        // set up newCount for next attempt
-                        newCount = unmaskedCount + 1;
-                    }
-                    else // readerCanJoin returned false
-                    {
-                        // Abandon attempting to join this node,
-                        break;
-                    }
-                }
+                return;
             }
         }
         else
@@ -147,6 +131,7 @@ void MrwLockOpt::performRelease(mrwo_qnode* node)
         }
     }
 
+    //totalNodes.fetch_add(1);
     setLocked(next,false);
 }
 void MrwLockOpt::print()

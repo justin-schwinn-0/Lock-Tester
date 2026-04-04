@@ -34,10 +34,10 @@ void McsLock::lock()
 
     if(pred)
     {
-        mine.locked= true;
+        mine.locked.store(true);
         pred->next.store(&mine);
 
-        while(mine.locked)
+        while(mine.locked.load())
         {
             //std::this_thread::yield();
         }
@@ -60,6 +60,6 @@ void McsLock::unlock()
     }
 
     mcs_qnode* myNext = mine.next.load();
-    myNext->locked = false;
+    myNext->locked.store(false);
     mine.next.store(nullptr);
 }

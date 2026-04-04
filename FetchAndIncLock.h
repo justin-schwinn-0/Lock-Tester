@@ -30,8 +30,8 @@ public:
     void lock();
     void unlock();
 private:
-    std::atomic<int> token;
-    int turn;
+    alignas(64) std::atomic<int> token;
+    alignas(64) std::atomic<int> turn;
 
 };
 

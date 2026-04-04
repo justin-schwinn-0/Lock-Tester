@@ -6,9 +6,9 @@
 
 struct CohortData
 {
-    std::atomic<bool> isCohortWaiting = false;
+    alignas(64) std::atomic<bool> isCohortWaiting = false;
     // number of threads currently using the cohort
-    std::atomic<uint32_t> cohortees = 0;
+    alignas(64) std::atomic<uint32_t> cohortees = 0;
     std::atomic<bool> locked = true;
 
     static const uint32_t LAST_BIT = 0x80000000;

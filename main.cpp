@@ -32,6 +32,9 @@
 #include "MrwLockOpt.h"
 #include "CrmrRwLockR.h"
 #include "MrwLockCO.h"
+#include "ManagedMrwCo.h"
+
+#include "CkLocks.h"
 
 #include "GroupRwCohort.h"
 #include "CohortFunctions.h"
@@ -271,6 +274,12 @@ std::vector<int> getCompConfig(int maxT, int stride = 8,int threshold = 32)
     }
 }
 
+// about 1G
+std::vector<uint8_t> bigVec1G = std::vector<uint8_t>(1 << 30,9);
+std::vector<uint8_t> bigVec1K = std::vector<uint8_t>(1 << 10,9);
+std::vector<uint8_t> bigVec1K_2 = std::vector<uint8_t>(1 << 10,9);
+
+uint64_t singleVal = 0;
 
 struct TestOptions
 {
@@ -288,17 +297,47 @@ struct TestOptions
     int x3 = -1;
     int t1 = -1;
     int t2 = -1;
-    int t3 = -1;
+    int t3 = 0;
+    int trials = 1;
     std::function<bool()> distribution;
     std::function<void()> w_section;
     std::function<void()> r_section;
 };
+
+struct ThreadLocals
+{
+    std::mt19937 gen;
+
+    ThreadLocals()
+    {
+        int seed = std::chrono::system_clock::now().time_since_epoch().count();
+        gen = std::mt19937(seed);
+    }
+
+    int intDistRand(int min, int max)
+    {
+        std::uniform_int_distribution<> dist(min,max);
+
+        return dist(gen);
+    }
+
+    double realDistRand(double min, double max)
+    {
+        std::uniform_real_distribution<> dist(min,max);
+
+        return dist(gen);
+    }
+};
+
+static thread_local ThreadLocals tl = ThreadLocals();
 
 struct Aligned64bUint
 {
     alignas(64) uint64_t value;
 };
 
+#pragma GCC push_options
+#pragma GCC optimize ("O0")
 template<class RwLock>
 void rwThrptTest
 (
@@ -311,6 +350,17 @@ void rwThrptTest
     auto dist = opt.distribution;
     auto w_section = opt.w_section;
     auto r_section = opt.r_section;
+    auto nc_section = [&]()
+    {
+        static thread_local int ncTotal = 0;
+        
+
+        for(int i = 0; i < opt.t3; i++)
+        {
+            int z = tl.intDistRand(0,bigVec1K_2.size());
+            ncTotal += bigVec1K_2[z];
+        }
+    };
     int numThreads = opt.threads;
     int x1 = opt.x1;
     int x2 = opt.x2;
@@ -328,6 +378,8 @@ void rwThrptTest
 
         while(continueFlag)
         {
+            nc_section();
+
             if(dist())
             {
                 //write
@@ -346,6 +398,7 @@ void rwThrptTest
             }
         }
     };
+
 
     std::vector<std::thread> threads;
     std::vector<Aligned64bUint> writeIterations = std::vector<Aligned64bUint>(numThreads,{0});
@@ -392,10 +445,11 @@ void rwThrptTest
 
     double combinedRate = writeRate + readRate;
 
-    printf("%s,%s,%s,%f,%d,%d,%d,%d,%d,%d,%d,%.3e,%.3e,%.3e\n",
+    printf("%s,%s,%s,%s,%.2f,%d,%d,%d,%d,%d,%d,%d,%.3e,%.3e,%.3e\n",
             opt.name.c_str(),
             opt.lockType.c_str(),
             opt.csType.c_str(),
+            opt.distType.c_str(),
             opt.writeRatio,
             numThreads,
             x1,x2,x3,
@@ -404,9 +458,8 @@ void rwThrptTest
             readRate,
             combinedRate);
 }
+#pragma GCC pop_options
 
-// about 1G
-std::vector<uint8_t> bigVec1G = std::vector<uint8_t>(1 << 30,9);
 
 void chooseSection
 (
@@ -427,7 +480,7 @@ void chooseSection
             printf("Running on CPU: %d\n",cpuId);
         };
     }
-    else if(opt.csType == "n-mem-access")
+    else if(opt.csType == "n-mem-1G")
     {
         //thread will access n random bytes of memory,
         // from a huge vector.
@@ -435,36 +488,83 @@ void chooseSection
         // value is stored in a cache,
         int rtrials = opt.t1; 
         int wtrials = opt.t2; 
-        opt.r_section = [=]()
+        opt.r_section = [=,&bigVec1G,&tl]()
         {
             static thread_local int total = 0;
-            
-            static thread_local unsigned int seed = std::chrono::system_clock::now().time_since_epoch().count();
-            static thread_local std::mt19937 gen(seed);
-            static thread_local std::uniform_int_distribution<> dist(0,bigVec1G.size());
 
             for(int i = 0; i < rtrials; i++)
             {
-                int z = dist(gen);
+                int z = tl.intDistRand(0,bigVec1G.size());
                 total += bigVec1G[z];
             }
         };
-        opt.w_section = [=]()
+        opt.w_section = [=,&bigVec1G,&tl]()
         {
             static thread_local int total = 0;
-            
-            static thread_local unsigned int seed = std::chrono::system_clock::now().time_since_epoch().count();
-            static thread_local std::mt19937 gen(seed);
-            static thread_local std::uniform_int_distribution<> dist(0,bigVec1G.size());
 
             for(int i = 0; i < wtrials; i++)
             {
-                int z = dist(gen);
+                int z = tl.intDistRand(0,bigVec1G.size());
                 total += bigVec1G[z];
                 bigVec1G[z] = total;
             }
         };
 
+    }
+    else if(opt.csType == "n-mem-1K")
+    {
+        //thread will access n random bytes of memory,
+        // from a huge vector.
+        // the size of the vector makes it unlikley that the
+        // value is stored in a cache,
+        int rtrials = opt.t1; 
+        int wtrials = opt.t2; 
+        opt.r_section = [=,&bigVec1K]()
+        {
+            static thread_local int total = 0;
+
+            for(int i = 0; i < rtrials; i++)
+            {
+                int z = tl.intDistRand(0,bigVec1K.size());
+                total += bigVec1K[z];
+            }
+        };
+        opt.w_section = [=,&bigVec1K]()
+        {
+            static thread_local int total = 0;
+
+            for(int i = 0; i < wtrials; i++)
+            {
+                int z = tl.intDistRand(0,bigVec1K.size());
+                total += bigVec1K[z];
+                bigVec1K[z] = total;
+            }
+        };
+
+    }
+    else if( opt.csType == "n-mem-1")
+    {
+        int rtrials = opt.t1; 
+        int wtrials = opt.t2; 
+        opt.r_section = [=,&singleVal]()
+        {
+            static thread_local int total = 0;
+
+            for(int i = 0; i < rtrials; i++)
+            {
+                total += singleVal;
+            }
+        };
+        opt.w_section = [=,&singleVal]()
+        {
+            static thread_local int total = 0;
+
+            for(int i = 0; i < wtrials; i++)
+            {
+                total += singleVal;
+                singleVal = total;
+            }
+        };
     }
     else
     {
@@ -480,10 +580,14 @@ void chooseDist
 {
 
     //true returns read, false returns write
+    int ratio = opt.writeRatio;
 
     if(opt.distType == "random")
     {
-
+        opt.distribution = [&]()
+        {
+            return tl.realDistRand(0,100) < ratio;
+        };
     }
     else if(opt.distType == "pure-r")
     {
@@ -518,7 +622,6 @@ void chooseDist
     }
     else if(opt.distType == "static")
     {
-        int ratio = opt.writeRatio;
         opt.distribution = [=]()
         {
             static thread_local uint32_t counter = 0;
@@ -538,15 +641,6 @@ void chooseDist
             return counter % 10 == 0; 
         };
     }
-}
-
-void chooseGroupFunc
-(
- 
-    TestOptions& opt
-)
-{
-    std::function<uint32_t()> grpFunc;
 }
 
 using MrwCo2 = GroupRwCohort<FetchAndIncLock,
@@ -612,6 +706,10 @@ void runTest
     {
         rwThrptTest<MrwLockOpt>(opt);
     }
+    else if(opt.lockType == "mmrwco")
+    {
+        rwThrptTest<ManagedMrwCo>(opt);
+    }
     else if(opt.lockType == "crmr-w")
     {
         rwThrptTest<CrmrRwLock>(opt);
@@ -644,6 +742,18 @@ void runTest
     {
         rwThrptTest<CrmrwCo16>(opt);
     }
+    else if(opt.lockType == "ck-tflock")
+    {
+        rwThrptTest<CkTfLock>(opt);
+    }
+    else if(opt.lockType == "ck-rwlock")
+    {
+        rwThrptTest<CkRwLock>(opt);
+    }
+    else if(opt.lockType == "ck-pflock")
+    {
+        rwThrptTest<CkPfLock>(opt);
+    }
     else if(opt.lockType == "cpp-std")
     {
         rwThrptTest<BaseRwLock>(opt);
@@ -654,15 +764,17 @@ void runTest
     }
 }
 
-void blank()
-{}
-
 int main(int argc, char** argv)
 {   
     OptionParser parser;
     TestOptions test;
 
-    PrintCohortFunction<NumaN_NHT<2>>();
+    
+    //runRwCorrectnessTestsForLock<CkTfLock>(1,{4,8,15},"CK-TfLock",true);
+    //runRwCorrectnessTestsForLock<CkRwLock>(1,{4,8,15},"CK-RwLock",true);
+    //runRwCorrectnessTestsForLock<CkPfLock>(1,{4,8,15},"CK-PfLock",true);
+    runRwCorrectnessTestsForLock<MrwLockOpt>(1,{4,8,15},"MRW",true);
+    runRwCorrectnessTestsForLock<CrmrRwLock>(1,{4,8,15},"CRMR",true);
 
     parser.addOption("--time",
             [&](const std::string& s)
@@ -754,6 +866,12 @@ int main(int argc, char** argv)
                 test.t3 = Utils::strToInt(s);
             },true);
 
+    parser.addOption("--trials",
+            [&](const std::string& s)
+            {
+                test.trials = Utils::strToInt(s);
+            },true);
+
     parser.parse(argc,argv);
 
     if(test.name.empty())
@@ -785,14 +903,15 @@ int main(int argc, char** argv)
     
     chooseDist(test);
     chooseSection(test);
-    chooseGroupFunc(test);
 
-    runRwCorrectnessTestsForLock<MrwCo2>(1,{4,8,15},"MrwCo2 7800x3d",true);
-    runRwCorrectnessTestsForLock<CrmrwCo2>(1,{4,8,15},"CrmrRwLockCo2 7800x3d",true);
-    runRwCorrectnessTestsForLock<CrmrwCo8>(1,{4,8,15},"CrmrRwLockCo8 7800x3d",true);
-    runRwCorrectnessTestsForLock<CrmrwCo16>(1,{4,8,15},"CrmrRwLockCo16 7800x3d",true);
+    //runRwCorrectnessTestsForLock<CrmrwCo2>(1,{4,8,15},"CrmrRwLockCo2 7800x3d",true);
+    //runRwCorrectnessTestsForLock<CrmrwCo8>(1,{4,8,15},"CrmrRwLockCo8 7800x3d",true);
+    //runRwCorrectnessTestsForLock<CrmrwCo16>(1,{4,8,15},"CrmrRwLockCo16 7800x3d",true);
     //runRwCorrectnessTestsForLock<MrwLockOpt>(2,{4,8,8,8,8,8,8,8,8,8,15},"MrwLockOpt 7800x3d",true);
     //runRwCorrectnessTestsForLock<MrwLockOpt>(2,std::vector<int>(100,8),"MRW-OPT 7800x3d",true);
     //runRwCorrectnessTestsForLock<CrmrRwLock>(10,{4,8,15},"CRMR-WP 7800x3d",true);
-    runTest(test);
+    for(int i =0; i < test.trials; i++)
+    {
+        runTest(test);
+    }
 }
