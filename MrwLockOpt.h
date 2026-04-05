@@ -68,9 +68,8 @@ public:
     bool readerCanJoin(uint32_t count)
     {
         // return value of lower 31 bits
-        return (count & ~LAST_BIT_MASK) > 0;
+        return count >= 0x80000001;
     }
-
 
     bool tryJoinNode(mrwo_qnode* node, uint32_t expec)
     {

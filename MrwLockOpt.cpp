@@ -5,6 +5,7 @@
 
 // changes are now frozen!
 // nvm added concurrent entering!
+// nvm removed concurrent entering!
 
 static thread_local mrwo_qnode mine[2];
 static thread_local mrwo_qnode* myTarget;

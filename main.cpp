@@ -27,16 +27,12 @@
 //rw locks
 #include "BaseRwLock.h"
 #include "CrmrRwLock.h"
-#include "CrmrRwLockCo.h"
 #include "MrwLock.h"
 #include "MrwLockOpt.h"
 #include "CrmrRwLockR.h"
-#include "MrwLockCO.h"
-#include "ManagedMrwCo.h"
 
 #include "CkLocks.h"
 
-#include "GroupRwCohort.h"
 #include "CohortFunctions.h"
 
 #include "OptionParser.h"
@@ -584,7 +580,7 @@ void chooseDist
 
     if(opt.distType == "random")
     {
-        opt.distribution = [&]()
+        opt.distribution = [=,&tl]()
         {
             return tl.realDistRand(0,100) < ratio;
         };
@@ -605,7 +601,7 @@ void chooseDist
     }
     else if(opt.distType == "fast-9-1")
     {
-        opt.distribution = [=]()
+        opt.distribution = []()
         {
             static thread_local uint32_t counter = 0;
             counter += 1;
@@ -643,41 +639,6 @@ void chooseDist
     }
 }
 
-using MrwCo2 = GroupRwCohort<FetchAndIncLock,
-                    MrwLockCO,
-                    NumaN_NHT<2>,
-                    2>;
-
-using MrwCo8 = GroupRwCohort<FetchAndIncLock,
-                    MrwLockCO,
-                    NumaN_NHT<8>,
-                    8>;
-
-using MrwCo16 = GroupRwCohort<FetchAndIncLock,
-                    MrwLockCO,
-                    NumaN_NHT<16>,
-                    16>;
-
-using CrmrwCo2 = GroupRwCohort<FetchAndIncLock,
-                    CrmrRwLockCo,
-                    NumaN_NHT<2>,
-                    2>;
-
-using CrmrwCo8 = GroupRwCohort<FetchAndIncLock,
-                    CrmrRwLockCo,
-                    NumaN_NHT<8>,
-                    8>;
-
-using CrmrwCo16 = GroupRwCohort<FetchAndIncLock,
-                    CrmrRwLockCo,
-                    NumaN_NHT<16>,
-                    16>;
-
-using MrwCo8_HT = GroupRwCohort<FetchAndIncLock,
-                    MrwLockCO,
-                    NumaN_NHT<8>,
-                    8>;
-
 void runTest
 (
     const TestOptions& opt
@@ -699,16 +660,9 @@ void runTest
     MrwLockOpt::setNodeSearchLimit(s);
     MrwLockOpt::setCasAttemptLimit(c);
 
-    MrwLockCO::setNodeSearchLimit(s);
-    MrwLockCO::setCasAttemptLimit(c);
-
     if(opt.lockType == "mrw-opt")
     {
         rwThrptTest<MrwLockOpt>(opt);
-    }
-    else if(opt.lockType == "mmrwco")
-    {
-        rwThrptTest<ManagedMrwCo>(opt);
     }
     else if(opt.lockType == "crmr-w")
     {
@@ -717,30 +671,6 @@ void runTest
     else if(opt.lockType == "crmr-r")
     {
         rwThrptTest<CrmrRwLockR>(opt);
-    }
-    else if(opt.lockType == "mrw-co-2")
-    {
-        rwThrptTest<MrwCo2>(opt);
-    }
-    else if(opt.lockType == "mrw-co-8")
-    {
-        rwThrptTest<MrwCo8>(opt);
-    }
-    else if(opt.lockType == "mrw-co-16")
-    {
-        rwThrptTest<MrwCo16>(opt);
-    }
-    else if(opt.lockType == "crmr-w-co-2")
-    {
-        rwThrptTest<CrmrwCo2>(opt);
-    }
-    else if(opt.lockType == "crmr-w-co-8")
-    {
-        rwThrptTest<CrmrwCo8>(opt);
-    }
-    else if(opt.lockType == "crmr-w-co-16")
-    {
-        rwThrptTest<CrmrwCo16>(opt);
     }
     else if(opt.lockType == "ck-tflock")
     {
@@ -773,8 +703,8 @@ int main(int argc, char** argv)
     //runRwCorrectnessTestsForLock<CkTfLock>(1,{4,8,15},"CK-TfLock",true);
     //runRwCorrectnessTestsForLock<CkRwLock>(1,{4,8,15},"CK-RwLock",true);
     //runRwCorrectnessTestsForLock<CkPfLock>(1,{4,8,15},"CK-PfLock",true);
-    runRwCorrectnessTestsForLock<MrwLockOpt>(1,{4,8,15},"MRW",true);
-    runRwCorrectnessTestsForLock<CrmrRwLock>(1,{4,8,15},"CRMR",true);
+    //runRwCorrectnessTestsForLock<MrwLockOpt>(1,{4,8,15},"MRW",true);
+    //runRwCorrectnessTestsForLock<CrmrRwLock>(1,{4,8,15},"CRMR",true);
 
     parser.addOption("--time",
             [&](const std::string& s)
@@ -904,12 +834,6 @@ int main(int argc, char** argv)
     chooseDist(test);
     chooseSection(test);
 
-    //runRwCorrectnessTestsForLock<CrmrwCo2>(1,{4,8,15},"CrmrRwLockCo2 7800x3d",true);
-    //runRwCorrectnessTestsForLock<CrmrwCo8>(1,{4,8,15},"CrmrRwLockCo8 7800x3d",true);
-    //runRwCorrectnessTestsForLock<CrmrwCo16>(1,{4,8,15},"CrmrRwLockCo16 7800x3d",true);
-    //runRwCorrectnessTestsForLock<MrwLockOpt>(2,{4,8,8,8,8,8,8,8,8,8,15},"MrwLockOpt 7800x3d",true);
-    //runRwCorrectnessTestsForLock<MrwLockOpt>(2,std::vector<int>(100,8),"MRW-OPT 7800x3d",true);
-    //runRwCorrectnessTestsForLock<CrmrRwLock>(10,{4,8,15},"CRMR-WP 7800x3d",true);
     for(int i =0; i < test.trials; i++)
     {
         runTest(test);

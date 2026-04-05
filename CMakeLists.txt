@@ -25,12 +25,9 @@ set(Sources
     McsLock.cpp
     CnaLock.cpp
     CrmrRwLock.cpp
-    CrmrRwLockCo.cpp
     CrmrRwLockR.cpp
     MrwLock.cpp
     MrwLockOpt.cpp
-    MrwLockCO.cpp
-    ManagedMrwCo.cpp
     OptionParser.cpp
 )
 
@@ -50,14 +47,10 @@ set(Headers
     CnaLock.h
     BaseRwLock.h
     CrmrRwLock.h
-    CrmrRwLockCo.h
     CrmrRwLockR.h
     MrwLock.h
     MrwLockOpt.h
-    MrwLockCO.h
-    ManagedMrwCo.h
     OptionParser.h
-    GroupRwCohort.h
     CkLocks.h
 )
 

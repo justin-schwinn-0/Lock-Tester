@@ -5,7 +5,7 @@ build/LockTester \
     --threads 16 \
     --csType "n-mem-1" \
     --lockType "mrw-opt" \
-    --distType "static" \
+    --distType "random" \
     --ratio "10.0" \
     --t1 5 \
     --t2 5 \
