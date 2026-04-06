@@ -18,5 +18,5 @@ export NUM_THREADS=$SLURM_CPUS_PER_TASK
 # Run your program
 srun bash -c '
 cd ${SLURM_SUBMIT_DIR}
-./node-cmd-files/ARCH-test-${SLURM_PROCID}.sh
+./new-cs-tests/ARCH-test-${SLURM_PROCID}.sh
 '

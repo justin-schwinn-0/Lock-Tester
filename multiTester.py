@@ -50,20 +50,26 @@ p.add_argument("--outDir", type=str,default=1,help="Output Directory")
 
 args = p.parse_args();
 
-threadSpace = [1]
+threadSpace = []
 
-for i in range(2,args.threads+1,2):
+for i in range(8,args.threads+1,8):
     threadSpace.append(i)
 
 ratioSpace = ["2.0","5.0","10.0","20.0"]
 
-lockSpace = ["mrw-opt","crmr-w","cpp-std"]
+lockSpace = ["mrw-opt",
+             "crmr-w",
+             "cpp-std",
+             "ck_tflock",
+             "ck_pflock",
+             "ck_rwlock"]
 
-csSpace = [csSpot("n-mem-1G",1,1),
-           csSpot("n-mem-1G",5,5),
+csSpace = [csSpot("n-mem-1",1,1),
            csSpot("n-mem-1K",1,1),
            csSpot("n-mem-1K",5,5),
-           csSpot("empty")]
+           csSpot("n-mem-1G",1,1),
+           csSpot("n-mem-1G",5,5),
+           csSpot("empty",1,1)]
 
 count = 0
 groups = []
@@ -84,7 +90,7 @@ for l in lockSpace:
                 count += args.trials
                 testStr = f"{args.nodeName} {l} {c.getStr()} {t}"
 
-                testStr = f"./build/LockTester --name {name} --time {sec} --threads {t} --lockType \"{l}\" --distType \"static\" --ratio {r} {c.getStr()} --trials {trials}"
+                testStr = f"numactl --interleave=all ./build/LockTester --name {name} --time {sec} --threads {t} --lockType \"{l}\" --distType \"random\" --ratio {r} {c.getStr()} --trials {trials}"
                 groups[i].addTest(testStr,args.seconds*args.trials)
                 i = (i+1) % (len(groups))
 

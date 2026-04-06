@@ -91,8 +91,7 @@ public:
                 if(readerCanJoin(expec))
                 {
                     // we can still try and join,
-                    // set up newCount for next attempt
-                    expec = expec + 1;
+                    continue;
                 }
                 else 
                 {
